@@ -105,8 +105,8 @@
   }
   nav.tabbar button{
     background:none; border:none; color:var(--text-dim); font-family:inherit;
-    display:flex; flex-direction:column; align-items:center; gap:3px; font-size:10.5px;
-    padding:4px 10px; cursor:pointer; letter-spacing:0.02em;
+    display:flex; flex-direction:column; align-items:center; gap:3px; font-size:9.5px;
+    padding:4px 6px; cursor:pointer; letter-spacing:0.01em;
   }
   nav.tabbar button .ic{ font-size:19px; line-height:1; }
   nav.tabbar button.active{ color:var(--gold); }
@@ -165,17 +165,13 @@
       </div>
     </section>
 
-    <section class="view" id="view-watchlist">
+    <section class="view" id="view-markets">
       <div class="card">
-        <h3>Add Symbol</h3>
-        <div class="add-row">
-          <input type="text" id="watchInput" placeholder="e.g. AAPL" autocapitalize="characters" autocomplete="off">
-          <button class="btn primary" id="btnAddWatch">Add</button>
+        <h3>Markets</h3>
+        <div class="empty-hint" style="text-align:left; padding:0 0 12px;">
+          Endgame Ledger trades exactly five instruments — nothing else can be ordered, even if requested directly from the backend.
         </div>
-      </div>
-      <div class="card">
-        <h3>Watchlist</h3>
-        <div class="row-list" id="watchList"><div class="empty-hint">No symbols yet — add one above.</div></div>
+        <div class="row-list" id="marketsList"><div class="empty-hint">Connect in Settings to load markets.</div></div>
       </div>
     </section>
 
@@ -190,6 +186,21 @@
       <div class="card">
         <h3>Recent Orders</h3>
         <div class="row-list" id="ordersList"><div class="empty-hint">No orders yet.</div></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-bot">
+      <div class="card">
+        <h3>Autopilot</h3>
+        <div id="botStatusLine" class="paper-notice" style="text-align:left; margin:0 0 14px;"><span class="conn-dot pending"></span>Checking status…</div>
+        <button class="btn block" id="btnBotToggle">Pause Autopilot</button>
+        <div class="empty-hint" style="text-align:left; padding:12px 0 0;">
+          Runs every 15 minutes on Cloudflare, even with the app closed. Trend + RSI strategy across all five markets, capped at 10% of buying power per trade, with an automatic daily loss halt at −5% equity.
+        </div>
+      </div>
+      <div class="card">
+        <h3>Recent Decisions</h3>
+        <div class="row-list" id="botLog"><div class="empty-hint">No activity yet.</div></div>
       </div>
     </section>
 
@@ -217,9 +228,10 @@
 
   <nav class="tabbar">
     <button class="tab-btn active" data-tab="account"><span class="ic">◈</span>Account</button>
-    <button class="tab-btn" data-tab="watchlist"><span class="ic">☆</span>Watch</button>
+    <button class="tab-btn" data-tab="markets"><span class="ic">☆</span>Markets</button>
     <button class="tab-btn" data-tab="positions"><span class="ic">▤</span>Positions</button>
     <button class="tab-btn" data-tab="orders"><span class="ic">≡</span>Orders</button>
+    <button class="tab-btn" data-tab="bot"><span class="ic">◆</span>Bot</button>
     <button class="tab-btn" data-tab="settings"><span class="ic">⚙</span>Settings</button>
   </nav>
 
@@ -237,7 +249,7 @@
     <button data-side="sell">Sell</button>
   </div>
 
-  <label class="field">Quantity (shares)</label>
+  <label class="field" id="qtyLabel">Quantity (shares)</label>
   <input type="number" id="qtyInput" min="1" step="1" value="1">
 
   <label class="field">Order Type</label>
@@ -271,14 +283,17 @@ function loadConfig(){
   try{ return JSON.parse(localStorage.getItem('ledger_config') || '{}'); }catch(e){ return {}; }
 }
 function saveConfig(cfg){ localStorage.setItem('ledger_config', JSON.stringify(cfg)); }
-function loadWatchlist(){
-  try{ return JSON.parse(localStorage.getItem('ledger_watchlist') || '["AAPL","TSLA","SPY"]'); }catch(e){ return ["AAPL","TSLA","SPY"]; }
-}
-function saveWatchlist(list){ localStorage.setItem('ledger_watchlist', JSON.stringify(list)); }
 
 var config = loadConfig();
-var watchlist = loadWatchlist();
-var state = { account:null, positions:[], orders:[], quotes:{} };
+var state = { account:null, positions:[], orders:[], quotes:{}, markets:[] };
+
+function marketFor(symbol){
+  return state.markets.find(function(m){ return m.symbol === symbol; });
+}
+function unitLabel(symbol){
+  var m = marketFor(symbol);
+  return (m && m.assetClass === 'crypto') ? 'BTC' : 'sh';
+}
 
 /* ---------- api ---------- */
 function apiFetch(path, opts){
@@ -336,9 +351,10 @@ function onTabShown(tab){
     return;
   }
   if(tab === 'account'){ refreshAccount(); refreshPositions(true); }
-  if(tab === 'watchlist'){ refreshWatchlistQuotes(); }
+  if(tab === 'markets'){ ensureMarketsLoaded().then(refreshMarketQuotes); }
   if(tab === 'positions'){ refreshPositions(false); }
   if(tab === 'orders'){ refreshOrders(); }
+  if(tab === 'bot'){ refreshBotStatus(); }
 }
 
 /* ---------- settings ---------- */
@@ -361,7 +377,8 @@ document.getElementById('btnSaveCfg').addEventListener('click', function(){
   apiFetch('/api/account').then(function(){
     updateConnStatus('ok','Connected to your paper account.');
     toast('Connected!');
-    refreshAccount(); refreshPositions(true);
+    state.markets = [];
+    refreshAccount(); refreshPositions(true); ensureMarketsLoaded();
   }).catch(function(err){
     updateConnStatus('err', 'Could not connect — ' + err.message);
   });
@@ -392,7 +409,7 @@ function renderPositionRow(p, container){
   row.className = 'item';
   row.innerHTML =
     '<div class="left"><div class="sym">' + p.symbol + '</div>' +
-    '<div class="sub">' + parseFloat(p.qty) + ' sh · avg ' + fmtMoney(p.avg_entry_price) + '</div></div>' +
+    '<div class="sub">' + parseFloat(p.qty) + ' ' + unitLabel(p.symbol) + ' · avg ' + fmtMoney(p.avg_entry_price) + '</div></div>' +
     '<div class="right"><div class="price mono">' + fmtMoney(p.market_value) + '</div>' +
     '<div class="change mono ' + (pl>=0?'pos':'neg') + '">' + (pl>=0?'+':'') + fmtMoney(pl) + ' (' + fmtPct(plpc) + ')</div></div>';
   row.addEventListener('click', function(){ openOrderSheet(p.symbol, 'sell'); });
@@ -420,50 +437,43 @@ function refreshPositions(previewOnly){
   }).catch(function(err){ toast(err.message); });
 }
 
-/* ---------- watchlist ---------- */
-function renderWatchlist(){
-  var container = document.getElementById('watchList');
+/* ---------- markets (fixed five, sourced from the backend) ---------- */
+function ensureMarketsLoaded(){
+  if(state.markets.length){ return Promise.resolve(state.markets); }
+  return apiFetch('/api/markets').then(function(data){
+    state.markets = data.markets || [];
+    renderMarkets();
+    return state.markets;
+  }).catch(function(err){ toast(err.message); return []; });
+}
+
+function renderMarkets(){
+  var container = document.getElementById('marketsList');
   container.innerHTML = '';
-  if(watchlist.length === 0){
-    container.innerHTML = '<div class="empty-hint">No symbols yet — add one above.</div>';
+  if(state.markets.length === 0){
+    container.innerHTML = '<div class="empty-hint">Connect in Settings to load markets.</div>';
     return;
   }
-  watchlist.forEach(function(sym){
-    var q = state.quotes[sym];
+  state.markets.forEach(function(m){
+    var q = state.quotes[m.symbol];
     var row = document.createElement('div');
     row.className = 'item';
     var priceTxt = q ? fmtMoney(q.mid) : '…';
     row.innerHTML =
-      '<div class="left"><div class="sym">' + sym + '</div><div class="sub">bid ' + (q?fmtMoney(q.bid):'—') + ' · ask ' + (q?fmtMoney(q.ask):'—') + '</div></div>' +
+      '<div class="left"><div class="sym">' + m.name + '</div><div class="sub">' + m.symbol + ' · bid ' + (q?fmtMoney(q.bid):'—') + ' · ask ' + (q?fmtMoney(q.ask):'—') + '</div></div>' +
       '<div class="right"><div class="price mono">' + priceTxt + '</div></div>';
-    row.addEventListener('click', function(){ openOrderSheet(sym, 'buy'); });
-    var rm = document.createElement('button');
-    rm.textContent = '✕'; rm.className='btn ghost'; rm.style.marginLeft='8px'; rm.style.padding='6px 10px';
-    rm.addEventListener('click', function(ev){
-      ev.stopPropagation();
-      watchlist = watchlist.filter(function(s){ return s!==sym; });
-      saveWatchlist(watchlist); renderWatchlist();
-    });
-    row.appendChild(rm);
+    row.addEventListener('click', function(){ openOrderSheet(m.symbol, 'buy'); });
     container.appendChild(row);
   });
 }
-document.getElementById('btnAddWatch').addEventListener('click', function(){
-  var input = document.getElementById('watchInput');
-  var sym = input.value.trim().toUpperCase();
-  if(!sym) return;
-  if(watchlist.indexOf(sym) === -1){ watchlist.push(sym); saveWatchlist(watchlist); }
-  input.value=''; renderWatchlist(); refreshWatchlistQuotes();
-});
 
-function refreshWatchlistQuotes(){
-  renderWatchlist();
-  watchlist.forEach(function(sym){
-    apiFetch('/api/quote/' + sym).then(function(data){
-      var q = data.quote || data;
+function refreshMarketQuotes(){
+  state.markets.forEach(function(m){
+    apiFetch('/api/quote?symbol=' + encodeURIComponent(m.symbol)).then(function(data){
+      var q = (data.quotes && data.quotes[m.symbol]) || data.quote || data;
       var bid = parseFloat(q.bp), ask = parseFloat(q.ap);
-      state.quotes[sym] = { bid:bid, ask:ask, mid: (bid && ask) ? (bid+ask)/2 : (ask || bid) };
-      renderWatchlist();
+      state.quotes[m.symbol] = { bid:bid, ask:ask, mid: (bid && ask) ? (bid+ask)/2 : (ask || bid) };
+      renderMarkets();
     }).catch(function(){ /* leave as unknown */ });
   });
 }
@@ -507,10 +517,18 @@ var sheetState = { symbol:null, side:'buy', type:'market' };
 function openOrderSheet(symbol, side){
   if(!config.url || !config.token){ toast('Connect your backend in Settings first'); return; }
   sheetState = { symbol:symbol, side:side||'buy', type:'market' };
-  document.getElementById('sheetSymbol').textContent = symbol;
+  var market = marketFor(symbol);
+  document.getElementById('sheetSymbol').textContent = (market ? market.name + ' · ' : '') + symbol;
   var q = state.quotes[symbol];
   document.getElementById('sheetPrice').textContent = q ? ('bid ' + fmtMoney(q.bid) + ' · ask ' + fmtMoney(q.ask)) : 'Quote unavailable — market order will use live price';
-  document.getElementById('qtyInput').value = 1;
+
+  var qtyInput = document.getElementById('qtyInput');
+  var isCrypto = market && market.assetClass === 'crypto';
+  document.getElementById('qtyLabel').textContent = isCrypto ? 'Quantity (BTC)' : 'Quantity (shares)';
+  qtyInput.step = isCrypto ? '0.0001' : '1';
+  qtyInput.min = isCrypto ? '0.0001' : '1';
+  qtyInput.value = isCrypto ? '0.01' : '1';
+
   document.getElementById('limitPriceInput').value = '';
   document.getElementById('limitPriceWrap').style.display = 'none';
   document.getElementById('reviewBox').style.display = 'none';
@@ -553,11 +571,13 @@ document.getElementById('btnSheetReview').addEventListener('click', function(){
   var reviewBox = document.getElementById('reviewBox');
   var btn = document.getElementById('btnSheetReview');
   if(btn.textContent === 'Review Order'){
-    var qty = parseInt(document.getElementById('qtyInput').value, 10);
-    if(!qty || qty < 1){ toast('Enter a valid quantity'); return; }
+    var qty = parseFloat(document.getElementById('qtyInput').value);
+    if(!qty || qty <= 0){ toast('Enter a valid quantity'); return; }
     var limitPrice = document.getElementById('limitPriceInput').value;
     if(sheetState.type === 'limit' && (!limitPrice || parseFloat(limitPrice) <= 0)){ toast('Enter a limit price'); return; }
-    var desc = '<b>' + sheetState.side.toUpperCase() + '</b> ' + qty + ' share' + (qty>1?'s':'') + ' of <b>' + sheetState.symbol + '</b><br>' +
+    var unit = unitLabel(sheetState.symbol);
+    var market = marketFor(sheetState.symbol);
+    var desc = '<b>' + sheetState.side.toUpperCase() + '</b> ' + qty + ' ' + unit + ' of <b>' + (market ? market.name : sheetState.symbol) + '</b><br>' +
       'Order type: ' + sheetState.type + (sheetState.type==='limit' ? (' @ ' + fmtMoney(limitPrice)) : ' (fills at current price)') + '<br>' +
       'Account: Paper trading — simulated funds only.';
     reviewBox.innerHTML = desc;
@@ -566,8 +586,8 @@ document.getElementById('btnSheetReview').addEventListener('click', function(){
     return;
   }
   // submit
-  var qty2 = parseInt(document.getElementById('qtyInput').value, 10);
-  var payload = { symbol: sheetState.symbol, qty: qty2, side: sheetState.side, type: sheetState.type, time_in_force: 'day' };
+  var qty2 = parseFloat(document.getElementById('qtyInput').value);
+  var payload = { symbol: sheetState.symbol, qty: qty2, side: sheetState.side, type: sheetState.type };
   if(sheetState.type === 'limit') payload.limit_price = document.getElementById('limitPriceInput').value;
   btn.disabled = true; btn.textContent = 'Submitting…';
   apiFetch('/api/orders', { method:'POST', body: payload }).then(function(){
@@ -579,13 +599,70 @@ document.getElementById('btnSheetReview').addEventListener('click', function(){
   }).finally(function(){ btn.disabled = false; });
 });
 
+/* ---------- autopilot ---------- */
+var botState = { manualHalt:false };
+
+function refreshBotStatus(){
+  apiFetch('/api/bot/status').then(function(data){
+    botState.manualHalt = !!data.manualHalt;
+    var line = document.getElementById('botStatusLine');
+    var toggleBtn = document.getElementById('btnBotToggle');
+    if(data.lossHalt){
+      line.innerHTML = '<span class="conn-dot err"></span>Halted — daily loss limit reached. Resumes automatically tomorrow.';
+      toggleBtn.textContent = 'Autopilot Halted (Loss Limit)';
+      toggleBtn.disabled = true;
+    } else if(botState.manualHalt){
+      line.innerHTML = '<span class="conn-dot pending"></span>Paused by you.';
+      toggleBtn.textContent = 'Resume Autopilot';
+      toggleBtn.disabled = false;
+    } else {
+      line.innerHTML = '<span class="conn-dot ok"></span>Running — checking markets every 15 minutes.';
+      toggleBtn.textContent = 'Pause Autopilot';
+      toggleBtn.disabled = false;
+    }
+
+    var logEl = document.getElementById('botLog');
+    logEl.innerHTML = '';
+    var log = data.log || [];
+    if(log.length === 0){
+      logEl.innerHTML = '<div class="empty-hint">No activity yet — first run happens on the next 15-minute mark.</div>';
+      return;
+    }
+    log.forEach(function(entry){
+      var row = document.createElement('div');
+      row.className = 'item';
+      var when = new Date(entry.t);
+      var timeTxt = when.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+      row.innerHTML =
+        '<div class="left"><div class="sym">' + entry.symbol + '</div><div class="sub">' + entry.note + '</div></div>' +
+        '<div class="right"><span class="status-chip ' + botActionClass(entry.action) + '">' + entry.action + '</span><div class="sub" style="margin-top:4px;">' + timeTxt + '</div></div>';
+      logEl.appendChild(row);
+    });
+  }).catch(function(err){
+    document.getElementById('botStatusLine').innerHTML = '<span class="conn-dot err"></span>' + err.message;
+  });
+}
+
+function botActionClass(action){
+  if(action === 'BUY' || action === 'SELL') return 'filled';
+  if(action === 'ERROR' || action === 'HALT') return 'rejected';
+  return 'open';
+}
+
+document.getElementById('btnBotToggle').addEventListener('click', function(){
+  var next = !botState.manualHalt;
+  apiFetch('/api/bot/toggle', { method:'POST', body:{ halted: next } }).then(function(){
+    toast(next ? 'Autopilot paused' : 'Autopilot resumed');
+    refreshBotStatus();
+  }).catch(function(err){ toast(err.message); });
+});
+
 /* ---------- init ---------- */
-renderWatchlist();
 if(config.url && config.token){
   updateConnStatus('pending','Checking connection…');
   apiFetch('/api/account').then(function(){
     updateConnStatus('ok','Connected to your paper account.');
-    refreshAccount(); refreshPositions(true);
+    refreshAccount(); refreshPositions(true); ensureMarketsLoaded();
   }).catch(function(err){ updateConnStatus('err', 'Could not connect — ' + err.message); });
 } else {
   document.querySelector('[data-tab="settings"]').click();
@@ -597,12 +674,13 @@ if('serviceWorker' in navigator){
   });
 }
 
-// light auto-refresh while account tab is open
+// light auto-refresh while account/markets tab is open
 setInterval(function(){
   var activeTab = document.querySelector('.tab-btn.active').dataset.tab;
   if(document.hidden || !config.url || !config.token) return;
   if(activeTab === 'account'){ refreshAccount(); refreshPositions(true); }
-  if(activeTab === 'watchlist'){ refreshWatchlistQuotes(); }
+  if(activeTab === 'markets'){ refreshMarketQuotes(); }
+  if(activeTab === 'bot'){ refreshBotStatus(); }
 }, 20000);
 
 })();
