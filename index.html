@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Endgame Ledger</title>
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="theme-color" content="#0b1210">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root{
+    --bg:#0b1210; --panel:#141d1a; --panel-hi:#1b2622;
+    --line:rgba(201,168,76,0.14); --line-soft:rgba(239,232,214,0.08);
+    --gold:#c9a84c; --gold-dim:#8a7434; --gold-soft:#e7cd8c;
+    --text:#eee7d6; --text-dim:#93a39a;
+    --green:#4cc98a; --red:#e2645a;
+    --ink:#070b09;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{ margin:0; padding:0; height:100%; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono{ font-family:'SF Mono','Roboto Mono',ui-monospace,Menlo,Consolas,monospace; }
+
+  #app{ height:100dvh; display:flex; flex-direction:column; }
+
+  header.top{
+    padding:calc(env(safe-area-inset-top,12px) + 6px) 16px 10px;
+    display:flex; align-items:center; justify-content:space-between;
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg, rgba(201,168,76,0.06), transparent);
+  }
+  .brandmark{ display:flex; align-items:center; gap:8px; }
+  .brandmark .dot{ width:8px; height:8px; border-radius:50%; background:var(--gold); }
+  .brandmark span{ font-size:14px; letter-spacing:0.08em; text-transform:uppercase; color:var(--gold-soft); font-weight:600; }
+  .badge-paper{ font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--ink); background:var(--gold); padding:4px 8px; border-radius:20px; font-weight:700; }
+
+  main{ flex:1; overflow-y:auto; padding:14px 16px calc(90px + env(safe-area-inset-bottom,0px)); }
+  .view{ display:none; }
+  .view.active{ display:block; }
+
+  .card{ background:var(--panel); border:1px solid var(--line-soft); border-radius:10px; padding:16px; margin-bottom:12px; }
+  .card h3{ margin:0 0 10px; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-dim); font-weight:600; }
+
+  .equity-figure{ font-size:34px; font-weight:600; letter-spacing:-0.01em; }
+  .equity-delta{ font-size:14px; margin-top:4px; }
+  .equity-delta.pos{ color:var(--green); } .equity-delta.neg{ color:var(--red); }
+  .stat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+  .stat{ background:var(--panel-hi); border-radius:8px; padding:10px 12px; }
+  .stat .label{ font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.08em; }
+  .stat .val{ font-size:16px; margin-top:3px; }
+
+  .row-list .item{ display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--line-soft); gap:10px; }
+  .row-list .item:last-child{ border-bottom:none; }
+  .item .left{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .item .sym{ font-weight:700; font-size:15px; }
+  .item .sub{ font-size:11.5px; color:var(--text-dim); }
+  .item .right{ text-align:right; flex:none; }
+  .item .price{ font-size:15px; }
+  .item .change.pos{ color:var(--green); font-size:12px; }
+  .item .change.neg{ color:var(--red); font-size:12px; }
+  .empty-hint{ color:var(--text-dim); font-size:13px; text-align:center; padding:22px 8px; }
+
+  .add-row{ display:flex; gap:8px; margin-bottom:6px; }
+  .add-row input{ flex:1; }
+  input[type=text], input[type=number], input[type=password]{
+    background:var(--panel-hi); border:1px solid var(--line-soft); color:var(--text);
+    border-radius:7px; padding:11px 12px; font-size:14px; font-family:inherit; width:100%;
+  }
+  input:focus{ outline:none; border-color:var(--gold-dim); }
+  label.field{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); margin:12px 0 6px; }
+  label.field:first-child{ margin-top:0; }
+
+  .btn{ padding:12px 14px; border-radius:8px; border:1px solid var(--line-soft); background:var(--panel-hi);
+    color:var(--text); font-size:14px; font-family:inherit; cursor:pointer; }
+  .btn.primary{ background:linear-gradient(155deg,var(--gold),var(--gold-dim)); color:#1c1508; font-weight:700; border:none; }
+  .btn.buy{ background:linear-gradient(155deg,#5fd89e,#2f9c6c); color:#052b18; font-weight:700; border:none; }
+  .btn.sell{ background:linear-gradient(155deg,#f0776c,#c1483c); color:#2b0906; font-weight:700; border:none; }
+  .btn.block{ width:100%; }
+  .btn.ghost{ background:transparent; }
+  .btn:active{ transform:scale(0.98); }
+  .btn:disabled{ opacity:0.4; }
+  .btn-row{ display:flex; gap:8px; }
+
+  .toggle-pair{ display:flex; gap:8px; }
+  .toggle-pair button{ flex:1; padding:11px; border-radius:7px; border:1px solid var(--line-soft); background:var(--panel-hi); color:var(--text-dim); font-family:inherit; font-size:13.5px; cursor:pointer; }
+  .toggle-pair button.active-buy{ background:linear-gradient(155deg,#5fd89e,#2f9c6c); color:#052b18; font-weight:700; border:none; }
+  .toggle-pair button.active-sell{ background:linear-gradient(155deg,#f0776c,#c1483c); color:#2b0906; font-weight:700; border:none; }
+  .toggle-pair button.active-neutral{ background:linear-gradient(155deg,var(--gold),var(--gold-dim)); color:#1c1508; font-weight:700; border:none; }
+
+  .status-chip{ font-size:10px; padding:3px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:0.06em; font-weight:700; }
+  .status-chip.filled{ background:rgba(76,201,138,0.18); color:var(--green); }
+  .status-chip.open, .status-chip.new, .status-chip.accepted, .status-chip.pending_new{ background:rgba(201,168,76,0.18); color:var(--gold-soft); }
+  .status-chip.canceled, .status-chip.rejected, .status-chip.expired{ background:rgba(226,100,90,0.16); color:var(--red); }
+
+  nav.tabbar{
+    position:fixed; left:0; right:0; bottom:0;
+    display:flex; justify-content:space-around;
+    background:rgba(20,29,26,0.94); backdrop-filter:blur(10px);
+    border-top:1px solid var(--line);
+    padding:8px 4px calc(8px + env(safe-area-inset-bottom,0px));
+  }
+  nav.tabbar button{
+    background:none; border:none; color:var(--text-dim); font-family:inherit;
+    display:flex; flex-direction:column; align-items:center; gap:3px; font-size:10.5px;
+    padding:4px 10px; cursor:pointer; letter-spacing:0.02em;
+  }
+  nav.tabbar button .ic{ font-size:19px; line-height:1; }
+  nav.tabbar button.active{ color:var(--gold); }
+
+  .sheet-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:40; display:none; }
+  .sheet-backdrop.show{ display:block; }
+  .sheet{
+    position:fixed; left:0; right:0; bottom:0; z-index:41;
+    background:var(--panel); border-top:1px solid var(--line);
+    border-radius:16px 16px 0 0; padding:18px 18px calc(20px + env(safe-area-inset-bottom,0px));
+    transform:translateY(100%); transition:transform .22s ease;
+    max-height:86dvh; overflow-y:auto;
+  }
+  .sheet.show{ transform:translateY(0); }
+  .sheet .handle{ width:36px; height:4px; background:var(--line-soft); border-radius:4px; margin:0 auto 14px; }
+  .sheet h2{ margin:0 0 4px; font-size:19px; }
+  .sheet .sym-price{ color:var(--text-dim); font-size:13px; margin-bottom:14px; }
+  .confirm-box{ background:var(--panel-hi); border-radius:8px; padding:14px; margin:14px 0; font-size:13.5px; line-height:1.7; }
+  .confirm-box b{ color:var(--gold-soft); }
+  .paper-notice{ font-size:11px; color:var(--text-dim); text-align:center; margin-top:10px; }
+
+  .toast{ position:fixed; left:50%; bottom:100px; transform:translateX(-50%) translateY(20px); opacity:0;
+    background:var(--panel-hi); border:1px solid var(--line); color:var(--text); padding:11px 18px; border-radius:30px;
+    font-size:13px; z-index:60; transition:all .25s ease; max-width:88vw; text-align:center; }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  .conn-dot{ width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
+  .conn-dot.ok{ background:var(--green); } .conn-dot.err{ background:var(--red); } .conn-dot.pending{ background:var(--text-dim); }
+
+  ::-webkit-scrollbar{ width:0; height:0; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header class="top">
+    <div class="brandmark"><span class="dot"></span><span>Endgame Ledger</span></div>
+    <div class="badge-paper">Paper Trading</div>
+  </header>
+
+  <main>
+
+    <section class="view active" id="view-account">
+      <div class="card">
+        <h3>Portfolio Value</h3>
+        <div class="equity-figure mono" id="acctEquity">—</div>
+        <div class="equity-delta mono" id="acctDelta">—</div>
+        <div class="stat-grid">
+          <div class="stat"><div class="label">Cash</div><div class="val mono" id="acctCash">—</div></div>
+          <div class="stat"><div class="label">Buying Power</div><div class="val mono" id="acctBP">—</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Open Positions</h3>
+        <div class="row-list" id="acctPositionsPreview"><div class="empty-hint">Connect your account in Settings to get started.</div></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-watchlist">
+      <div class="card">
+        <h3>Add Symbol</h3>
+        <div class="add-row">
+          <input type="text" id="watchInput" placeholder="e.g. AAPL" autocapitalize="characters" autocomplete="off">
+          <button class="btn primary" id="btnAddWatch">Add</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Watchlist</h3>
+        <div class="row-list" id="watchList"><div class="empty-hint">No symbols yet — add one above.</div></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-positions">
+      <div class="card">
+        <h3>Open Positions</h3>
+        <div class="row-list" id="positionsList"><div class="empty-hint">No open positions.</div></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-orders">
+      <div class="card">
+        <h3>Recent Orders</h3>
+        <div class="row-list" id="ordersList"><div class="empty-hint">No orders yet.</div></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-settings">
+      <div class="card">
+        <h3>Backend Connection</h3>
+        <label class="field">Worker URL</label>
+        <input type="text" id="cfgUrl" placeholder="https://your-worker.workers.dev" autocapitalize="none" autocomplete="off">
+        <label class="field">App Token</label>
+        <input type="password" id="cfgToken" placeholder="the password you set with wrangler" autocomplete="off">
+        <div class="btn-row" style="margin-top:14px;">
+          <button class="btn primary block" id="btnSaveCfg">Save & Test Connection</button>
+        </div>
+        <div class="paper-notice" id="cfgStatus"><span class="conn-dot pending"></span>Not connected yet</div>
+      </div>
+      <div class="card">
+        <h3>About</h3>
+        <div class="empty-hint" style="text-align:left; padding:0;">
+          This app talks only to the backend URL above. Your Alpaca keys are never stored here — they live only in your Cloudflare Worker. All trading here uses Alpaca's paper account (simulated money).
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <nav class="tabbar">
+    <button class="tab-btn active" data-tab="account"><span class="ic">◈</span>Account</button>
+    <button class="tab-btn" data-tab="watchlist"><span class="ic">☆</span>Watch</button>
+    <button class="tab-btn" data-tab="positions"><span class="ic">▤</span>Positions</button>
+    <button class="tab-btn" data-tab="orders"><span class="ic">≡</span>Orders</button>
+    <button class="tab-btn" data-tab="settings"><span class="ic">⚙</span>Settings</button>
+  </nav>
+
+</div>
+
+<div class="sheet-backdrop" id="sheetBackdrop"></div>
+<div class="sheet" id="orderSheet">
+  <div class="handle"></div>
+  <h2 id="sheetSymbol">—</h2>
+  <div class="sym-price mono" id="sheetPrice">—</div>
+
+  <label class="field">Side</label>
+  <div class="toggle-pair" id="sideToggle">
+    <button data-side="buy" class="active-buy">Buy</button>
+    <button data-side="sell">Sell</button>
+  </div>
+
+  <label class="field">Quantity (shares)</label>
+  <input type="number" id="qtyInput" min="1" step="1" value="1">
+
+  <label class="field">Order Type</label>
+  <div class="toggle-pair" id="typeToggle">
+    <button data-type="market" class="active-neutral">Market</button>
+    <button data-type="limit">Limit</button>
+  </div>
+
+  <div id="limitPriceWrap" style="display:none;">
+    <label class="field">Limit Price</label>
+    <input type="number" id="limitPriceInput" min="0" step="0.01" placeholder="0.00">
+  </div>
+
+  <div class="confirm-box" id="reviewBox" style="display:none;"></div>
+
+  <div class="btn-row" style="margin-top:16px;">
+    <button class="btn ghost" id="btnSheetCancel" style="flex:1;">Cancel</button>
+    <button class="btn primary" id="btnSheetReview" style="flex:2;">Review Order</button>
+  </div>
+  <div class="paper-notice">Simulated paper trade — no real money is used.</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------- config / storage ---------- */
+function loadConfig(){
+  try{ return JSON.parse(localStorage.getItem('ledger_config') || '{}'); }catch(e){ return {}; }
+}
+function saveConfig(cfg){ localStorage.setItem('ledger_config', JSON.stringify(cfg)); }
+function loadWatchlist(){
+  try{ return JSON.parse(localStorage.getItem('ledger_watchlist') || '["AAPL","TSLA","SPY"]'); }catch(e){ return ["AAPL","TSLA","SPY"]; }
+}
+function saveWatchlist(list){ localStorage.setItem('ledger_watchlist', JSON.stringify(list)); }
+
+var config = loadConfig();
+var watchlist = loadWatchlist();
+var state = { account:null, positions:[], orders:[], quotes:{} };
+
+/* ---------- api ---------- */
+function apiFetch(path, opts){
+  opts = opts || {};
+  if(!config.url || !config.token){
+    return Promise.reject(new Error('Not connected — set up Settings first.'));
+  }
+  var base = config.url.replace(/\/$/,'');
+  return fetch(base + path, {
+    method: opts.method || 'GET',
+    headers: Object.assign({ 'X-App-Token': config.token }, opts.body ? {'Content-Type':'application/json'} : {}),
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  }).then(function(r){
+    return r.json().then(function(data){
+      if(!r.ok) throw new Error((data && (data.error || data.message)) || ('Request failed: ' + r.status));
+      return data;
+    });
+  });
+}
+
+/* ---------- helpers ---------- */
+function fmtMoney(n){
+  n = parseFloat(n);
+  if(isNaN(n)) return '—';
+  var sign = n < 0 ? '-' : '';
+  return sign + '$' + Math.abs(n).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function fmtPct(n){
+  n = parseFloat(n);
+  if(isNaN(n)) return '—';
+  return (n>=0?'+':'') + (n*100).toFixed(2) + '%';
+}
+function toast(msg){
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 2600);
+}
+
+/* ---------- tabs ---------- */
+var tabs = document.querySelectorAll('.tab-btn');
+tabs.forEach(function(btn){
+  btn.addEventListener('click', function(){
+    tabs.forEach(function(b){ b.classList.remove('active'); });
+    btn.classList.add('active');
+    document.querySelectorAll('.view').forEach(function(v){ v.classList.remove('active'); });
+    document.getElementById('view-' + btn.dataset.tab).classList.add('active');
+    onTabShown(btn.dataset.tab);
+  });
+});
+
+function onTabShown(tab){
+  if(!config.url || !config.token){
+    if(tab !== 'settings'){ toast('Connect your backend in Settings first'); }
+    return;
+  }
+  if(tab === 'account'){ refreshAccount(); refreshPositions(true); }
+  if(tab === 'watchlist'){ refreshWatchlistQuotes(); }
+  if(tab === 'positions'){ refreshPositions(false); }
+  if(tab === 'orders'){ refreshOrders(); }
+}
+
+/* ---------- settings ---------- */
+document.getElementById('cfgUrl').value = config.url || '';
+document.getElementById('cfgToken').value = config.token || '';
+updateConnStatus(config.url && config.token ? 'pending' : 'pending', config.url ? 'Saved — tap Save & Test to verify' : 'Not connected yet');
+
+function updateConnStatus(kind, text){
+  var el = document.getElementById('cfgStatus');
+  el.innerHTML = '<span class="conn-dot ' + kind + '"></span>' + text;
+}
+
+document.getElementById('btnSaveCfg').addEventListener('click', function(){
+  var url = document.getElementById('cfgUrl').value.trim();
+  var token = document.getElementById('cfgToken').value.trim();
+  if(!url || !token){ updateConnStatus('err','Enter both a Worker URL and an App Token.'); return; }
+  config = { url:url, token:token };
+  saveConfig(config);
+  updateConnStatus('pending','Testing connection…');
+  apiFetch('/api/account').then(function(){
+    updateConnStatus('ok','Connected to your paper account.');
+    toast('Connected!');
+    refreshAccount(); refreshPositions(true);
+  }).catch(function(err){
+    updateConnStatus('err', 'Could not connect — ' + err.message);
+  });
+});
+
+/* ---------- account ---------- */
+function refreshAccount(){
+  apiFetch('/api/account').then(function(a){
+    state.account = a;
+    var equity = parseFloat(a.equity);
+    var lastEquity = parseFloat(a.last_equity);
+    var delta = equity - lastEquity;
+    var pct = lastEquity ? delta/lastEquity : 0;
+    document.getElementById('acctEquity').textContent = fmtMoney(equity);
+    var deltaEl = document.getElementById('acctDelta');
+    deltaEl.textContent = (delta>=0?'+':'-') + fmtMoney(Math.abs(delta)).replace('$','$') + ' today (' + fmtPct(pct) + ')';
+    deltaEl.className = 'equity-delta mono ' + (delta>=0?'pos':'neg');
+    document.getElementById('acctCash').textContent = fmtMoney(a.cash);
+    document.getElementById('acctBP').textContent = fmtMoney(a.buying_power);
+  }).catch(function(err){ toast(err.message); });
+}
+
+/* ---------- positions ---------- */
+function renderPositionRow(p, container){
+  var pl = parseFloat(p.unrealized_pl);
+  var plpc = parseFloat(p.unrealized_plpc);
+  var row = document.createElement('div');
+  row.className = 'item';
+  row.innerHTML =
+    '<div class="left"><div class="sym">' + p.symbol + '</div>' +
+    '<div class="sub">' + parseFloat(p.qty) + ' sh · avg ' + fmtMoney(p.avg_entry_price) + '</div></div>' +
+    '<div class="right"><div class="price mono">' + fmtMoney(p.market_value) + '</div>' +
+    '<div class="change mono ' + (pl>=0?'pos':'neg') + '">' + (pl>=0?'+':'') + fmtMoney(pl) + ' (' + fmtPct(plpc) + ')</div></div>';
+  row.addEventListener('click', function(){ openOrderSheet(p.symbol, 'sell'); });
+  container.appendChild(row);
+}
+
+function refreshPositions(previewOnly){
+  apiFetch('/api/positions').then(function(list){
+    state.positions = list || [];
+    var target = document.getElementById('positionsList');
+    var preview = document.getElementById('acctPositionsPreview');
+    [target, preview].forEach(function(el){ if(el) el.innerHTML=''; });
+    if(!list || list.length === 0){
+      if(target) target.innerHTML = '<div class="empty-hint">No open positions.</div>';
+      if(preview) preview.innerHTML = '<div class="empty-hint">No open positions.</div>';
+      return;
+    }
+    list.forEach(function(p){
+      if(!previewOnly && target) renderPositionRow(p, target);
+      if(preview) renderPositionRow(p, preview);
+    });
+    if(previewOnly && target && target.children.length === 0){
+      list.forEach(function(p){ renderPositionRow(p, target); });
+    }
+  }).catch(function(err){ toast(err.message); });
+}
+
+/* ---------- watchlist ---------- */
+function renderWatchlist(){
+  var container = document.getElementById('watchList');
+  container.innerHTML = '';
+  if(watchlist.length === 0){
+    container.innerHTML = '<div class="empty-hint">No symbols yet — add one above.</div>';
+    return;
+  }
+  watchlist.forEach(function(sym){
+    var q = state.quotes[sym];
+    var row = document.createElement('div');
+    row.className = 'item';
+    var priceTxt = q ? fmtMoney(q.mid) : '…';
+    row.innerHTML =
+      '<div class="left"><div class="sym">' + sym + '</div><div class="sub">bid ' + (q?fmtMoney(q.bid):'—') + ' · ask ' + (q?fmtMoney(q.ask):'—') + '</div></div>' +
+      '<div class="right"><div class="price mono">' + priceTxt + '</div></div>';
+    row.addEventListener('click', function(){ openOrderSheet(sym, 'buy'); });
+    var rm = document.createElement('button');
+    rm.textContent = '✕'; rm.className='btn ghost'; rm.style.marginLeft='8px'; rm.style.padding='6px 10px';
+    rm.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      watchlist = watchlist.filter(function(s){ return s!==sym; });
+      saveWatchlist(watchlist); renderWatchlist();
+    });
+    row.appendChild(rm);
+    container.appendChild(row);
+  });
+}
+document.getElementById('btnAddWatch').addEventListener('click', function(){
+  var input = document.getElementById('watchInput');
+  var sym = input.value.trim().toUpperCase();
+  if(!sym) return;
+  if(watchlist.indexOf(sym) === -1){ watchlist.push(sym); saveWatchlist(watchlist); }
+  input.value=''; renderWatchlist(); refreshWatchlistQuotes();
+});
+
+function refreshWatchlistQuotes(){
+  renderWatchlist();
+  watchlist.forEach(function(sym){
+    apiFetch('/api/quote/' + sym).then(function(data){
+      var q = data.quote || data;
+      var bid = parseFloat(q.bp), ask = parseFloat(q.ap);
+      state.quotes[sym] = { bid:bid, ask:ask, mid: (bid && ask) ? (bid+ask)/2 : (ask || bid) };
+      renderWatchlist();
+    }).catch(function(){ /* leave as unknown */ });
+  });
+}
+
+/* ---------- orders ---------- */
+function refreshOrders(){
+  apiFetch('/api/orders').then(function(list){
+    state.orders = list || [];
+    var container = document.getElementById('ordersList');
+    container.innerHTML = '';
+    if(!list || list.length === 0){ container.innerHTML = '<div class="empty-hint">No orders yet.</div>'; return; }
+    list.forEach(function(o){
+      var row = document.createElement('div');
+      row.className = 'item';
+      var priceInfo = o.filled_avg_price ? ('filled @ ' + fmtMoney(o.filled_avg_price)) : (o.limit_price ? ('limit ' + fmtMoney(o.limit_price)) : o.type);
+      row.innerHTML =
+        '<div class="left"><div class="sym">' + o.side.toUpperCase() + ' ' + o.symbol + '</div>' +
+        '<div class="sub">' + parseFloat(o.qty) + ' sh · ' + priceInfo + '</div></div>' +
+        '<div class="right"><span class="status-chip ' + o.status + '">' + o.status.replace('_',' ') + '</span></div>';
+      if(['new','accepted','pending_new','open'].indexOf(o.status) !== -1){
+        var cancelBtn = document.createElement('button');
+        cancelBtn.textContent='Cancel'; cancelBtn.className='btn ghost'; cancelBtn.style.marginLeft='8px'; cancelBtn.style.padding='6px 10px'; cancelBtn.style.fontSize='11px';
+        cancelBtn.addEventListener('click', function(ev){
+          ev.stopPropagation();
+          apiFetch('/api/orders/' + o.id, { method:'DELETE' }).then(function(){
+            toast('Order canceled'); refreshOrders();
+          }).catch(function(err){ toast(err.message); });
+        });
+        row.appendChild(cancelBtn);
+      }
+      container.appendChild(row);
+    });
+  }).catch(function(err){ toast(err.message); });
+}
+
+/* ---------- order sheet ---------- */
+var sheet = document.getElementById('orderSheet');
+var backdrop = document.getElementById('sheetBackdrop');
+var sheetState = { symbol:null, side:'buy', type:'market' };
+
+function openOrderSheet(symbol, side){
+  if(!config.url || !config.token){ toast('Connect your backend in Settings first'); return; }
+  sheetState = { symbol:symbol, side:side||'buy', type:'market' };
+  document.getElementById('sheetSymbol').textContent = symbol;
+  var q = state.quotes[symbol];
+  document.getElementById('sheetPrice').textContent = q ? ('bid ' + fmtMoney(q.bid) + ' · ask ' + fmtMoney(q.ask)) : 'Quote unavailable — market order will use live price';
+  document.getElementById('qtyInput').value = 1;
+  document.getElementById('limitPriceInput').value = '';
+  document.getElementById('limitPriceWrap').style.display = 'none';
+  document.getElementById('reviewBox').style.display = 'none';
+  document.getElementById('btnSheetReview').textContent = 'Review Order';
+  setSideUI(sheetState.side);
+  setTypeUI('market');
+  backdrop.classList.add('show'); sheet.classList.add('show');
+}
+function closeOrderSheet(){ backdrop.classList.remove('show'); sheet.classList.remove('show'); }
+backdrop.addEventListener('click', closeOrderSheet);
+document.getElementById('btnSheetCancel').addEventListener('click', closeOrderSheet);
+
+function setSideUI(side){
+  sheetState.side = side;
+  document.querySelectorAll('#sideToggle button').forEach(function(b){
+    b.classList.remove('active-buy','active-sell');
+    if(b.dataset.side === side) b.classList.add(side === 'buy' ? 'active-buy' : 'active-sell');
+  });
+}
+document.querySelectorAll('#sideToggle button').forEach(function(b){
+  b.addEventListener('click', function(){ setSideUI(b.dataset.side); resetReview(); });
+});
+function setTypeUI(type){
+  sheetState.type = type;
+  document.querySelectorAll('#typeToggle button').forEach(function(b){
+    b.classList.remove('active-neutral');
+    if(b.dataset.type === type) b.classList.add('active-neutral');
+  });
+  document.getElementById('limitPriceWrap').style.display = (type === 'limit') ? 'block' : 'none';
+}
+document.querySelectorAll('#typeToggle button').forEach(function(b){
+  b.addEventListener('click', function(){ setTypeUI(b.dataset.type); resetReview(); });
+});
+function resetReview(){
+  document.getElementById('reviewBox').style.display = 'none';
+  document.getElementById('btnSheetReview').textContent = 'Review Order';
+}
+
+document.getElementById('btnSheetReview').addEventListener('click', function(){
+  var reviewBox = document.getElementById('reviewBox');
+  var btn = document.getElementById('btnSheetReview');
+  if(btn.textContent === 'Review Order'){
+    var qty = parseInt(document.getElementById('qtyInput').value, 10);
+    if(!qty || qty < 1){ toast('Enter a valid quantity'); return; }
+    var limitPrice = document.getElementById('limitPriceInput').value;
+    if(sheetState.type === 'limit' && (!limitPrice || parseFloat(limitPrice) <= 0)){ toast('Enter a limit price'); return; }
+    var desc = '<b>' + sheetState.side.toUpperCase() + '</b> ' + qty + ' share' + (qty>1?'s':'') + ' of <b>' + sheetState.symbol + '</b><br>' +
+      'Order type: ' + sheetState.type + (sheetState.type==='limit' ? (' @ ' + fmtMoney(limitPrice)) : ' (fills at current price)') + '<br>' +
+      'Account: Paper trading — simulated funds only.';
+    reviewBox.innerHTML = desc;
+    reviewBox.style.display = 'block';
+    btn.textContent = 'Confirm & Submit';
+    return;
+  }
+  // submit
+  var qty2 = parseInt(document.getElementById('qtyInput').value, 10);
+  var payload = { symbol: sheetState.symbol, qty: qty2, side: sheetState.side, type: sheetState.type, time_in_force: 'day' };
+  if(sheetState.type === 'limit') payload.limit_price = document.getElementById('limitPriceInput').value;
+  btn.disabled = true; btn.textContent = 'Submitting…';
+  apiFetch('/api/orders', { method:'POST', body: payload }).then(function(){
+    toast('Order submitted');
+    closeOrderSheet();
+    refreshAccount(); refreshPositions(false); refreshOrders();
+  }).catch(function(err){
+    toast('Order failed: ' + err.message);
+  }).finally(function(){ btn.disabled = false; });
+});
+
+/* ---------- init ---------- */
+renderWatchlist();
+if(config.url && config.token){
+  updateConnStatus('pending','Checking connection…');
+  apiFetch('/api/account').then(function(){
+    updateConnStatus('ok','Connected to your paper account.');
+    refreshAccount(); refreshPositions(true);
+  }).catch(function(err){ updateConnStatus('err', 'Could not connect — ' + err.message); });
+} else {
+  document.querySelector('[data-tab="settings"]').click();
+}
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('./service-worker.js').catch(function(){});
+  });
+}
+
+// light auto-refresh while account tab is open
+setInterval(function(){
+  var activeTab = document.querySelector('.tab-btn.active').dataset.tab;
+  if(document.hidden || !config.url || !config.token) return;
+  if(activeTab === 'account'){ refreshAccount(); refreshPositions(true); }
+  if(activeTab === 'watchlist'){ refreshWatchlistQuotes(); }
+}, 20000);
+
+})();
+</script>
+</body>
+</html>
