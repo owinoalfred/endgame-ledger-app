@@ -247,6 +247,7 @@
             <div class="stat"><div class="label">Avg Loss</div><div class="val mono" id="jAvgLoss">—</div></div>
           </div>
           <div id="jBySymbol" style="margin-top:14px;"></div>
+          <div id="jByDay" style="margin-top:14px;"></div>
           <h3 style="margin-top:20px;">Closed Trades</h3>
           <div class="row-list" id="journalTrades"><div class="empty-hint">No closed trades yet — this fills in once a position is fully sold.</div></div>
         </div>
@@ -335,7 +336,7 @@
   </div>
 
   <details class="risk-panel">
-    <summary>Risk-based position sizing  (optional)</summary>
+    <summary>Risk-based position sizing (optional)</summary>
     <label class="field">Stop Price</label>
     <input type="number" id="stopPriceInput" min="0" step="0.01" placeholder="e.g. 175.00">
     <label class="field">Target Price</label>
@@ -497,7 +498,26 @@ function renderPositionRow(p, container){
     '<div class="right"><div class="price mono">' + fmtMoney(p.market_value) + '</div>' +
     '<div class="change mono ' + (pl>=0?'pos':'neg') + '">' + (pl>=0?'+':'') + fmtMoney(pl) + ' (' + fmtPct(plpc) + ')</div></div>';
   row.addEventListener('click', function(){ openOrderSheet(p.symbol, 'sell'); });
+
+  var closeBtn = document.createElement('button');
+  closeBtn.textContent = 'Close';
+  closeBtn.className = 'btn sell';
+  closeBtn.style.cssText = 'margin-top:6px; padding:6px 12px; font-size:11px; width:auto;';
+  closeBtn.addEventListener('click', function(ev){
+    ev.stopPropagation();
+    closePosition(p.symbol, p.qty);
+  });
+  row.querySelector('.right').appendChild(closeBtn);
+
   container.appendChild(row);
+}
+
+function closePosition(symbol, qty){
+  if(!window.confirm('Close position now: sell ' + qty + ' ' + unitLabel(symbol) + ' of ' + symbol + ' at market price?')) return;
+  apiFetch('/api/orders', { method:'POST', body:{ symbol:symbol, qty:qty, side:'sell', type:'market' } }).then(function(){
+    toast('Position closed');
+    refreshPositions(false); refreshAccount(); refreshOrders();
+  }).catch(function(err){ toast('Could not close: ' + err.message); });
 }
 
 function refreshPositions(previewOnly){
@@ -701,9 +721,35 @@ function refreshJournal(){
       });
     }
 
+    var byDayEl = document.getElementById('jByDay');
+    byDayEl.innerHTML = '';
+    var trades = data.trades || [];
+    var byDay = {};
+    trades.forEach(function(t){
+      var day = (t.exitTime || '').slice(0, 10);
+      if(!day) return;
+      if(!byDay[day]) byDay[day] = { pl: 0, trades: 0 };
+      byDay[day].pl += t.pl;
+      byDay[day].trades += 1;
+    });
+    var days = Object.keys(byDay).sort().reverse();
+    if(days.length){
+      var dayTitle = document.createElement('div');
+      dayTitle.className = 'label'; dayTitle.style.marginBottom='6px'; dayTitle.style.fontSize='10.5px'; dayTitle.style.textTransform='uppercase'; dayTitle.style.color='var(--text-dim)';
+      dayTitle.textContent = 'By Day';
+      byDayEl.appendChild(dayTitle);
+      days.forEach(function(day){
+        var row = document.createElement('div');
+        row.className = 'sym-pl-row';
+        var pl = byDay[day].pl;
+        var dateTxt = new Date(day + 'T00:00:00Z').toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'});
+        row.innerHTML = '<span>' + dateTxt + ' (' + byDay[day].trades + ')</span><span class="mono ' + (pl>=0?'rr-good':'rr-poor') + '">' + (pl>=0?'+':'-') + fmtMoney(Math.abs(pl)) + '</span>';
+        byDayEl.appendChild(row);
+      });
+    }
+
     var tradesEl = document.getElementById('journalTrades');
     tradesEl.innerHTML = '';
-    var trades = data.trades || [];
     if(trades.length === 0){
       tradesEl.innerHTML = '<div class="empty-hint">No closed trades yet — this fills in once a position is fully sold.</div>';
       return;
@@ -1027,7 +1073,8 @@ window.addEventListener('appinstalled', function(){
   toast('Installed — open it from your home screen from now on');
 });
 
-// live refresh while the relevant tab is open
+// live refresh while the relevant tab is open — 20s is plenty responsive
+// for account/position data and keeps request volume reasonable
 setInterval(function(){
   var activeTab = document.querySelector('.tab-btn.active').dataset.tab;
   if(document.hidden || !config.url || !config.token) return;
@@ -1035,7 +1082,7 @@ setInterval(function(){
   if(activeTab === 'positions'){ refreshPositions(false); }
   if(activeTab === 'markets'){ refreshMarketQuotes(); }
   if(activeTab === 'bot'){ refreshBotStatus(); }
-}, 8000);
+}, 20000);
 
 })();
 </script>
