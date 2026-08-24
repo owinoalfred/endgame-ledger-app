@@ -264,6 +264,14 @@
         </div>
       </div>
       <div class="card">
+        <h3>Alerts</h3>
+        <div id="alertStatusLine" class="paper-notice" style="text-align:left; margin:0 0 14px;">Not enabled</div>
+        <button class="btn block" id="btnEnableAlerts">Enable Alerts</button>
+        <div class="empty-hint" style="text-align:left; padding:12px 0 0;">
+          Notifies you the moment a BUY, SELL, error, or halt happens, while this app is open. Won't wake your phone if the app is fully closed — that needs push notifications, a separate, heavier feature not built yet.
+        </div>
+      </div>
+      <div class="card">
         <h3>Autopilot</h3>
         <div id="botStatusLine" class="paper-notice" style="text-align:left; margin:0 0 14px;"><span class="conn-dot pending"></span>Checking status…</div>
         <button class="btn block" id="btnBotToggle">Pause Autopilot</button>
@@ -304,7 +312,7 @@
     <button class="tab-btn" data-tab="markets"><span class="ic">☆</span>Markets</button>
     <button class="tab-btn" data-tab="positions"><span class="ic">▤</span>Positions</button>
     <button class="tab-btn" data-tab="orders"><span class="ic">≡</span>Orders</button>
-    <button class="tab-btn" data-tab="bot"><span class="ic">◆</span>Bot</button>
+    <button class="tab-btn" data-tab="bot" style="position:relative;"><span class="ic">◆</span>Bot<span id="botTabDot" style="display:none; position:absolute; top:2px; right:8px; width:8px; height:8px; border-radius:50%; background:var(--red);"></span></button>
   </nav>
 
 </div>
@@ -336,15 +344,16 @@
   </div>
 
   <details class="risk-panel">
-    <summary>Risk-based position sizing (optional)</summary>
+    <summary>Stop-loss / take-profit (optional)</summary>
     <label class="field">Stop Price</label>
     <input type="number" id="stopPriceInput" min="0" step="0.01" placeholder="e.g. 175.00">
     <label class="field">Target Price</label>
     <input type="number" id="targetPriceInput" min="0" step="0.01" placeholder="e.g. 195.00">
-    <label class="field">Risk (% of equity)</label>
+    <label class="field">Risk (% of equity, for sizing only)</label>
     <input type="number" id="riskPctInput" min="0.1" step="0.1" value="1">
     <div id="riskCalcBox" class="confirm-box" style="display:none;"></div>
     <button class="btn ghost block" id="btnUseSuggestedQty" style="display:none; margin-top:8px;">Use Suggested Quantity</button>
+    <div class="empty-hint" style="text-align:left; padding:8px 0 0;">Filling in Stop and/or Target places a real protective order on Alpaca, attached to this trade — not just a calculation.</div>
   </details>
 
   <div class="confirm-box" id="reviewBox" style="display:none;"></div>
@@ -354,6 +363,21 @@
     <button class="btn primary" id="btnSheetReview" style="flex:2;">Review Order</button>
   </div>
   <div class="paper-notice">Simulated paper trade — no real money is used.</div>
+</div>
+
+<div class="sheet-backdrop" id="chartBackdrop"></div>
+<div class="sheet" id="chartSheet">
+  <div class="handle"></div>
+  <h2 id="chartTitle">—</h2>
+  <div class="toggle-pair" id="chartTimeframeToggle" style="margin:10px 0;">
+    <button data-tf="15Min" class="active-neutral">15m</button>
+    <button data-tf="1Hour">1H</button>
+    <button data-tf="1Day">1D</button>
+  </div>
+  <div id="chartContainer"><div class="empty-hint">Loading chart…</div></div>
+  <div class="btn-row" style="margin-top:16px;">
+    <button class="btn ghost block" id="btnChartClose">Close</button>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -439,7 +463,7 @@ function onTabShown(tab){
   if(tab === 'markets'){ ensureMarketsLoaded().then(refreshMarketQuotes); refreshCorrelation(); }
   if(tab === 'positions'){ refreshPositions(false); }
   if(tab === 'orders'){ refreshOrders(); refreshJournal(); }
-  if(tab === 'bot'){ refreshBotStatus(); refreshKillStatus(); }
+  if(tab === 'bot'){ refreshBotStatus(); refreshKillStatus(); document.getElementById('botTabDot').style.display = 'none'; }
 }
 
 /* ---------- settings ---------- */
@@ -513,8 +537,8 @@ function renderPositionRow(p, container){
 }
 
 function closePosition(symbol, qty){
-  if(!window.confirm('Close position now: sell ' + qty + ' ' + unitLabel(symbol) + ' of ' + symbol + ' at market price?')) return;
-  apiFetch('/api/orders', { method:'POST', body:{ symbol:symbol, qty:qty, side:'sell', type:'market' } }).then(function(){
+  if(!window.confirm('Close position now: sell ' + qty + ' ' + unitLabel(symbol) + ' of ' + symbol + ' at market price? Any attached stop/target orders will be canceled too.')) return;
+  apiFetch('/api/positions?symbol=' + encodeURIComponent(symbol), { method:'DELETE' }).then(function(){
     toast('Position closed');
     refreshPositions(false); refreshAccount(); refreshOrders();
   }).catch(function(err){ toast('Could not close: ' + err.message); });
@@ -586,6 +610,14 @@ function renderMarkets(){
       '<div class="left"><div class="sym">' + m.name + '</div><div class="sub">' + m.symbol + ' · bid ' + (q?fmtMoney(q.bid):'—') + ' · ask ' + (q?fmtMoney(q.ask):'—') + '</div></div>' +
       '<div class="right"><div class="price mono">' + priceTxt + '</div></div>';
     row.addEventListener('click', function(){ openOrderSheet(m.symbol, 'buy'); });
+
+    var chartBtn = document.createElement('button');
+    chartBtn.textContent = 'Chart';
+    chartBtn.className = 'btn ghost';
+    chartBtn.style.cssText = 'margin-top:6px; padding:6px 12px; font-size:11px; width:auto;';
+    chartBtn.addEventListener('click', function(ev){ ev.stopPropagation(); openChart(m.symbol); });
+    row.querySelector('.right').appendChild(chartBtn);
+
     container.appendChild(row);
   });
 }
@@ -648,6 +680,111 @@ function renderCorrelation(symbols, matrix){
   html += '</tbody></table>';
   el.innerHTML = html;
 }
+
+/* ---------- price chart ---------- */
+var chartBackdrop = document.getElementById('chartBackdrop');
+var chartSheet = document.getElementById('chartSheet');
+var chartState = { symbol:null, timeframe:'15Min' };
+
+function openChart(symbol){
+  chartState.symbol = symbol;
+  chartState.timeframe = '15Min';
+  document.querySelectorAll('#chartTimeframeToggle button').forEach(function(b){
+    b.classList.toggle('active-neutral', b.dataset.tf === '15Min');
+  });
+  var m = marketFor(symbol);
+  document.getElementById('chartTitle').textContent = (m ? m.name : symbol) + ' · ' + symbol;
+  chartBackdrop.classList.add('show'); chartSheet.classList.add('show');
+  loadChart();
+}
+function closeChart(){ chartBackdrop.classList.remove('show'); chartSheet.classList.remove('show'); }
+chartBackdrop.addEventListener('click', closeChart);
+document.getElementById('btnChartClose').addEventListener('click', closeChart);
+document.querySelectorAll('#chartTimeframeToggle button').forEach(function(b){
+  b.addEventListener('click', function(){
+    chartState.timeframe = b.dataset.tf;
+    document.querySelectorAll('#chartTimeframeToggle button').forEach(function(x){ x.classList.remove('active-neutral'); });
+    b.classList.add('active-neutral');
+    loadChart();
+  });
+});
+
+function loadChart(){
+  var container = document.getElementById('chartContainer');
+  container.innerHTML = '<div class="empty-hint">Loading chart…</div>';
+  apiFetch('/api/bars?symbol=' + encodeURIComponent(chartState.symbol) + '&timeframe=' + chartState.timeframe + '&limit=60')
+    .then(function(data){
+      container.innerHTML = renderCandleChart(data.bars || []);
+    }).catch(function(err){
+      container.innerHTML = '<div class="empty-hint">' + err.message + '</div>';
+    });
+}
+
+function renderCandleChart(bars){
+  if(!bars || bars.length === 0){
+    return '<div class="empty-hint">No chart data available yet for this window.</div>';
+  }
+  var w = 640, priceH = 220, volH = 60, padding = 28;
+  var highs = bars.map(function(b){ return b.h; });
+  var lows = bars.map(function(b){ return b.l; });
+  var vols = bars.map(function(b){ return b.v || 0; });
+  var maxP = Math.max.apply(null, highs);
+  var minP = Math.min.apply(null, lows);
+  var maxV = Math.max.apply(null, vols) || 1;
+  var range = (maxP - minP) || (maxP * 0.01) || 1;
+  var n = bars.length;
+  var plotW = w - padding*2;
+  var candleW = plotW / n;
+  var bodyW = Math.max(1.2, candleW * 0.62);
+
+  function yPrice(price){ return padding + (1 - (price - minP) / range) * (priceH - padding*0.6); }
+  function xFor(i){ return padding + i * candleW + candleW/2; }
+
+  var totalH = priceH + volH + 14;
+  var svg = '<svg viewBox="0 0 ' + w + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:auto; display:block;">';
+
+  // subtle horizontal gridlines at high/mid/low
+  [minP, (minP+maxP)/2, maxP].forEach(function(p){
+    var y = yPrice(p);
+    svg += '<line x1="' + padding + '" y1="' + y + '" x2="' + (w-padding) + '" y2="' + y + '" stroke="rgba(239,232,214,0.08)" stroke-width="1"/>';
+    svg += '<text x="2" y="' + (y+3) + '" font-size="9" fill="rgba(163,176,168,0.7)">' + p.toFixed(2) + '</text>';
+  });
+
+  // candlesticks
+  bars.forEach(function(b, i){
+    var x = xFor(i);
+    var up = b.c >= b.o;
+    var color = up ? '#4cc98a' : '#e2645a';
+    var yHigh = yPrice(b.h), yLow = yPrice(b.l);
+    var yOpen = yPrice(b.o), yClose = yPrice(b.c);
+    var bodyTop = Math.min(yOpen, yClose);
+    var bodyHeight = Math.max(1, Math.abs(yClose - yOpen));
+    svg += '<line x1="' + x + '" y1="' + yHigh + '" x2="' + x + '" y2="' + yLow + '" stroke="' + color + '" stroke-width="1.2"/>';
+    svg += '<rect x="' + (x - bodyW/2) + '" y="' + bodyTop + '" width="' + bodyW + '" height="' + bodyHeight + '" fill="' + color + '"/>';
+  });
+
+  // volume bars beneath
+  var volTop = priceH + 10;
+  bars.forEach(function(b, i){
+    var x = xFor(i);
+    var up = b.c >= b.o;
+    var vh = ((b.v || 0) / maxV) * volH;
+    svg += '<rect x="' + (x - bodyW/2) + '" y="' + (volTop + volH - vh) + '" width="' + bodyW + '" height="' + Math.max(0.5, vh) + '" fill="' + (up ? 'rgba(76,201,138,0.55)' : 'rgba(226,100,90,0.55)') + '"/>';
+  });
+
+  svg += '</svg>';
+
+  var lastPrice = bars[bars.length-1].c;
+  var firstPrice = bars[0].c;
+  var changePct = firstPrice ? ((lastPrice - firstPrice) / firstPrice * 100) : 0;
+  var header = '<div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;">' +
+    '<span class="mono" style="font-size:18px;">' + fmtMoney(lastPrice) + '</span>' +
+    '<span class="mono ' + (changePct>=0?'pos':'neg') + '" style="font-size:13px;">' + (changePct>=0?'+':'') + changePct.toFixed(2) + '%</span>' +
+    '</div>';
+
+  return header + svg;
+}
+
 
 /* ---------- orders ---------- */
 function refreshOrders(){
@@ -912,9 +1049,16 @@ document.getElementById('btnSheetReview').addEventListener('click', function(){
     if(sheetState.type === 'limit' && (!limitPrice || parseFloat(limitPrice) <= 0)){ toast('Enter a limit price'); return; }
     var unit = unitLabel(sheetState.symbol);
     var market = marketFor(sheetState.symbol);
+    var stopVal = document.getElementById('stopPriceInput').value;
+    var targetVal = document.getElementById('targetPriceInput').value;
+    var hasStop = sheetState.side === 'buy' && stopVal && parseFloat(stopVal) > 0;
+    var hasTarget = sheetState.side === 'buy' && targetVal && parseFloat(targetVal) > 0;
     var desc = '<b>' + sheetState.side.toUpperCase() + '</b> ' + qty + ' ' + unit + ' of <b>' + (market ? market.name : sheetState.symbol) + '</b><br>' +
       'Order type: ' + sheetState.type + (sheetState.type==='limit' ? (' @ ' + fmtMoney(limitPrice)) : ' (fills at current price)') + '<br>' +
       'Account: Paper trading — simulated funds only.';
+    if(hasStop || hasTarget){
+      desc += '<br>Protective order: ' + (hasStop ? ('stop ' + fmtMoney(stopVal)) : '') + (hasStop && hasTarget ? ' · ' : '') + (hasTarget ? ('target ' + fmtMoney(targetVal)) : '') + ' — placed live on Alpaca.';
+    }
     reviewBox.innerHTML = desc;
     reviewBox.style.display = 'block';
     btn.textContent = 'Confirm & Submit';
@@ -924,6 +1068,10 @@ document.getElementById('btnSheetReview').addEventListener('click', function(){
   var qty2 = parseFloat(document.getElementById('qtyInput').value);
   var payload = { symbol: sheetState.symbol, qty: qty2, side: sheetState.side, type: sheetState.type };
   if(sheetState.type === 'limit') payload.limit_price = document.getElementById('limitPriceInput').value;
+  var stopVal2 = document.getElementById('stopPriceInput').value;
+  var targetVal2 = document.getElementById('targetPriceInput').value;
+  if(sheetState.side === 'buy' && stopVal2 && parseFloat(stopVal2) > 0) payload.stop_loss_price = stopVal2;
+  if(sheetState.side === 'buy' && targetVal2 && parseFloat(targetVal2) > 0) payload.take_profit_price = targetVal2;
   btn.disabled = true; btn.textContent = 'Submitting…';
   apiFetch('/api/orders', { method:'POST', body: payload }).then(function(){
     toast('Order submitted');
@@ -937,8 +1085,72 @@ document.getElementById('btnSheetReview').addEventListener('click', function(){
 /* ---------- autopilot ---------- */
 var botState = { manualHalt:false };
 
+/* ---------- alerts ---------- */
+var ALERT_ACTIONS = ['BUY','SELL','ERROR','HALT'];
+
+function alertsEnabled(){
+  return 'Notification' in window && Notification.permission === 'granted';
+}
+function updateAlertStatusLine(){
+  var line = document.getElementById('alertStatusLine');
+  var btn = document.getElementById('btnEnableAlerts');
+  if(!('Notification' in window)){
+    line.textContent = 'Not supported in this browser.';
+    btn.disabled = true;
+    return;
+  }
+  if(Notification.permission === 'granted'){
+    line.innerHTML = '<span class="conn-dot ok"></span>Enabled — notifies while the app is open.';
+    btn.textContent = 'Alerts Enabled';
+    btn.disabled = true;
+  } else if(Notification.permission === 'denied'){
+    line.innerHTML = '<span class="conn-dot err"></span>Blocked — enable notifications for this site in your browser settings.';
+    btn.disabled = true;
+  } else {
+    line.textContent = 'Not enabled';
+    btn.disabled = false;
+  }
+}
+document.getElementById('btnEnableAlerts').addEventListener('click', function(){
+  if(!('Notification' in window)) return;
+  Notification.requestPermission().then(function(){ updateAlertStatusLine(); });
+});
+updateAlertStatusLine();
+
+function loadLastAlertSeen(){ return localStorage.getItem('ledger_last_alert_seen') || ''; }
+function saveLastAlertSeen(t){ localStorage.setItem('ledger_last_alert_seen', t); }
+
+function processAlerts(log){
+  if(!log || log.length === 0) return;
+  var lastSeen = loadLastAlertSeen();
+  if(!lastSeen){
+    // First run ever — nothing to compare against yet. Start tracking from
+    // now rather than firing a flood of notifications for old history.
+    saveLastAlertSeen(log[0].t);
+    return;
+  }
+  var newImportant = log.filter(function(e){
+    return ALERT_ACTIONS.indexOf(e.action) !== -1 && e.t > lastSeen;
+  });
+  saveLastAlertSeen(log[0].t);
+  if(newImportant.length === 0) return;
+
+  newImportant.slice().reverse().forEach(function(entry){
+    var title = entry.symbol + ' — ' + entry.action;
+    toast(title + ': ' + entry.note);
+    if(alertsEnabled()){
+      try{ new Notification(title, { body: entry.note, icon: './icon-192.png' }); }catch(e){}
+    }
+  });
+  var activeTab = document.querySelector('.tab-btn.active').dataset.tab;
+  if(activeTab !== 'bot'){
+    document.getElementById('botTabDot').style.display = 'inline-block';
+  }
+}
+
 function refreshBotStatus(){
   apiFetch('/api/bot/status').then(function(data){
+    processAlerts(data.log || []);
     botState.manualHalt = !!data.manualHalt;
     var line = document.getElementById('botStatusLine');
     var toggleBtn = document.getElementById('btnBotToggle');
@@ -1083,6 +1295,15 @@ setInterval(function(){
   if(activeTab === 'markets'){ refreshMarketQuotes(); }
   if(activeTab === 'bot'){ refreshBotStatus(); }
 }, 20000);
+
+// alerts need checking regardless of which tab is open — separate, slower
+// interval so it doesn't add meaningfully to KV read volume
+setInterval(function(){
+  if(document.hidden || !config.url || !config.token) return;
+  var activeTab = document.querySelector('.tab-btn.active').dataset.tab;
+  if(activeTab === 'bot') return; // refreshBotStatus() above already covers this case
+  apiFetch('/api/bot/status').then(function(data){ processAlerts(data.log || []); }).catch(function(){});
+}, 60000);
 
 })();
 </script>
