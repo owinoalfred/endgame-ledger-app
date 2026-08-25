@@ -72,11 +72,12 @@
 
   .add-row{ display:flex; gap:8px; margin-bottom:6px; }
   .add-row input{ flex:1; }
-  input[type=text], input[type=number], input[type=password]{
+  input[type=text], input[type=number], input[type=password], select{
     background:var(--panel-hi); border:1px solid var(--line-soft); color:var(--text);
     border-radius:7px; padding:11px 12px; font-size:14px; font-family:inherit; width:100%;
   }
-  input:focus{ outline:none; border-color:var(--gold-dim); }
+  select{ appearance:none; -webkit-appearance:none; }
+  input:focus, select:focus{ outline:none; border-color:var(--gold-dim); }
   label.field{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); margin:12px 0 6px; }
   label.field:first-child{ margin-top:0; }
 
@@ -113,10 +114,10 @@
   }
   nav.tabbar button{
     background:none; border:none; color:var(--text-dim); font-family:inherit;
-    display:flex; flex-direction:column; align-items:center; gap:3px; font-size:10.5px;
-    padding:4px 10px; cursor:pointer; letter-spacing:0.02em;
+    display:flex; flex-direction:column; align-items:center; gap:3px; font-size:9.5px;
+    padding:4px 6px; cursor:pointer; letter-spacing:0.01em;
   }
-  nav.tabbar button .ic{ font-size:19px; line-height:1; }
+  nav.tabbar button .ic{ font-size:18px; line-height:1; }
   nav.tabbar button.active{ color:var(--gold); }
 
   .sheet-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:40; display:none; }
@@ -285,6 +286,21 @@
       </div>
     </section>
 
+    <section class="view" id="view-chart">
+      <div class="card">
+        <h3>Chart</h3>
+        <select id="chartSymbolSelect">
+          <option value="">Connect in Settings to load markets…</option>
+        </select>
+        <div class="toggle-pair" id="chartTimeframeToggle" style="margin:10px 0;">
+          <button data-tf="15Min" class="active-neutral">15m</button>
+          <button data-tf="1Hour">1H</button>
+          <button data-tf="1Day">1D</button>
+        </div>
+        <div id="chartContainer"><div class="empty-hint">Pick a market above.</div></div>
+      </div>
+    </section>
+
     <section class="view" id="view-settings">
       <div class="card">
         <h3>Backend Connection</h3>
@@ -313,6 +329,7 @@
     <button class="tab-btn" data-tab="positions"><span class="ic">▤</span>Positions</button>
     <button class="tab-btn" data-tab="orders"><span class="ic">≡</span>Orders</button>
     <button class="tab-btn" data-tab="bot" style="position:relative;"><span class="ic">◆</span>Bot<span id="botTabDot" style="display:none; position:absolute; top:2px; right:8px; width:8px; height:8px; border-radius:50%; background:var(--red);"></span></button>
+    <button class="tab-btn" data-tab="chart"><span class="ic">◐</span>Chart</button>
   </nav>
 
 </div>
@@ -363,21 +380,6 @@
     <button class="btn primary" id="btnSheetReview" style="flex:2;">Review Order</button>
   </div>
   <div class="paper-notice">Simulated paper trade — no real money is used.</div>
-</div>
-
-<div class="sheet-backdrop" id="chartBackdrop"></div>
-<div class="sheet" id="chartSheet">
-  <div class="handle"></div>
-  <h2 id="chartTitle">—</h2>
-  <div class="toggle-pair" id="chartTimeframeToggle" style="margin:10px 0;">
-    <button data-tf="15Min" class="active-neutral">15m</button>
-    <button data-tf="1Hour">1H</button>
-    <button data-tf="1Day">1D</button>
-  </div>
-  <div id="chartContainer"><div class="empty-hint">Loading chart…</div></div>
-  <div class="btn-row" style="margin-top:16px;">
-    <button class="btn ghost block" id="btnChartClose">Close</button>
-  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -464,6 +466,12 @@ function onTabShown(tab){
   if(tab === 'positions'){ refreshPositions(false); }
   if(tab === 'orders'){ refreshOrders(); refreshJournal(); }
   if(tab === 'bot'){ refreshBotStatus(); refreshKillStatus(); document.getElementById('botTabDot').style.display = 'none'; }
+  if(tab === 'chart'){
+    ensureMarketsLoaded().then(function(){
+      if(!chartSymbolsPopulated) populateChartSymbolSelect();
+      loadChart();
+    });
+  }
 }
 
 /* ---------- settings ---------- */
@@ -682,24 +690,37 @@ function renderCorrelation(symbols, matrix){
 }
 
 /* ---------- price chart ---------- */
-var chartBackdrop = document.getElementById('chartBackdrop');
-var chartSheet = document.getElementById('chartSheet');
 var chartState = { symbol:null, timeframe:'15Min' };
+var chartSymbolsPopulated = false;
 
-function openChart(symbol){
-  chartState.symbol = symbol;
-  chartState.timeframe = '15Min';
-  document.querySelectorAll('#chartTimeframeToggle button').forEach(function(b){
-    b.classList.toggle('active-neutral', b.dataset.tf === '15Min');
+function populateChartSymbolSelect(){
+  var sel = document.getElementById('chartSymbolSelect');
+  if(!state.markets.length) return;
+  var currentVal = sel.value;
+  sel.innerHTML = '';
+  state.markets.forEach(function(m){
+    var opt = document.createElement('option');
+    opt.value = m.symbol;
+    opt.textContent = m.name + ' (' + m.symbol + ')';
+    sel.appendChild(opt);
   });
-  var m = marketFor(symbol);
-  document.getElementById('chartTitle').textContent = (m ? m.name : symbol) + ' · ' + symbol;
-  chartBackdrop.classList.add('show'); chartSheet.classList.add('show');
-  loadChart();
+  chartSymbolsPopulated = true;
+  // keep whatever was already selected if still valid, else prefer BTC/USD, else first market
+  if(currentVal && state.markets.some(function(m){ return m.symbol === currentVal; })){
+    sel.value = currentVal;
+  } else if(state.markets.some(function(m){ return m.symbol === 'BTC/USD'; })){
+    sel.value = 'BTC/USD';
+  } else {
+    sel.value = state.markets[0].symbol;
+  }
+  chartState.symbol = sel.value;
 }
-function closeChart(){ chartBackdrop.classList.remove('show'); chartSheet.classList.remove('show'); }
-chartBackdrop.addEventListener('click', closeChart);
-document.getElementById('btnChartClose').addEventListener('click', closeChart);
+
+document.getElementById('chartSymbolSelect').addEventListener('change', function(e){
+  chartState.symbol = e.target.value;
+  loadChart();
+});
+
 document.querySelectorAll('#chartTimeframeToggle button').forEach(function(b){
   b.addEventListener('click', function(){
     chartState.timeframe = b.dataset.tf;
@@ -709,8 +730,21 @@ document.querySelectorAll('#chartTimeframeToggle button').forEach(function(b){
   });
 });
 
+// Called from the "Chart" button on a Markets row — switches to the
+// dedicated Chart tab with that symbol pre-selected.
+function openChart(symbol){
+  document.querySelector('[data-tab="chart"]').click();
+  ensureMarketsLoaded().then(function(){
+    if(!chartSymbolsPopulated) populateChartSymbolSelect();
+    document.getElementById('chartSymbolSelect').value = symbol;
+    chartState.symbol = symbol;
+    loadChart();
+  });
+}
+
 function loadChart(){
   var container = document.getElementById('chartContainer');
+  if(!chartState.symbol){ container.innerHTML = '<div class="empty-hint">Pick a market above.</div>'; return; }
   container.innerHTML = '<div class="empty-hint">Loading chart…</div>';
   apiFetch('/api/bars?symbol=' + encodeURIComponent(chartState.symbol) + '&timeframe=' + chartState.timeframe + '&limit=60')
     .then(function(data){
