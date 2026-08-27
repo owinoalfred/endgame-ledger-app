@@ -397,8 +397,22 @@ function saveConfig(cfg){ localStorage.setItem('ledger_config', JSON.stringify(c
 var config = loadConfig();
 var state = { account:null, positions:[], orders:[], quotes:{}, markets:[] };
 
+// Alpaca's positions endpoint returns crypto symbols without a slash
+// ("BTCUSD") while everywhere else — orders, quotes, our own /api/markets —
+// uses the slash form ("BTC/USD"). Normalize before any lookup against
+// state.markets, or crypto positions silently fail to match their market
+// info (wrong unit label, missing name, etc). Never used when sending a
+// symbol back to the backend — those must stay exactly as Alpaca gave them.
+function normalizeCryptoSymbol(symbol){
+  if(!symbol || symbol.indexOf('/') !== -1) return symbol;
+  if(symbol.slice(-3) === 'USD' && symbol.length > 3){
+    return symbol.slice(0, -3) + '/USD';
+  }
+  return symbol;
+}
 function marketFor(symbol){
-  return state.markets.find(function(m){ return m.symbol === symbol; });
+  var norm = normalizeCryptoSymbol(symbol);
+  return state.markets.find(function(m){ return m.symbol === norm; });
 }
 function unitLabel(symbol){
   var m = marketFor(symbol);
@@ -945,6 +959,7 @@ var sheetState = { symbol:null, side:'buy', type:'market' };
 
 function openOrderSheet(symbol, side){
   if(!config.url || !config.token){ toast('Connect your backend in Settings first'); return; }
+  symbol = normalizeCryptoSymbol(symbol); // position rows pass Alpaca's raw "BTCUSD"; canonicalize to "BTC/USD"
   sheetState = { symbol:symbol, side:side||'buy', type:'market' };
   var market = marketFor(symbol);
   document.getElementById('sheetSymbol').textContent = (market ? market.name + ' · ' : '') + symbol;
