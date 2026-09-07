@@ -224,6 +224,11 @@
         <h3>Open Positions</h3>
         <div class="row-list" id="positionsList"><div class="empty-hint">No open positions.</div></div>
       </div>
+      <div class="card">
+        <h3>Active Protection</h3>
+        <div class="row-list" id="protectiveList"><div class="empty-hint">No stop-loss/take-profit orders currently active.</div></div>
+        <div class="empty-hint" style="text-align:left; padding:10px 0 0;">When one of these triggers on its own, it'll disappear from this list and show up as a filled sell in Orders.</div>
+      </div>
     </section>
 
     <section class="view" id="view-orders">
@@ -265,11 +270,26 @@
         </div>
       </div>
       <div class="card">
-        <h3>Alerts</h3>
+        <h3>In-App Alerts</h3>
         <div id="alertStatusLine" class="paper-notice" style="text-align:left; margin:0 0 14px;">Not enabled</div>
         <button class="btn block" id="btnEnableAlerts">Enable Alerts</button>
         <div class="empty-hint" style="text-align:left; padding:12px 0 0;">
-          Notifies you the moment a BUY, SELL, error, or halt happens, while this app is open. Won't wake your phone if the app is fully closed — that needs push notifications, a separate, heavier feature not built yet.
+          Notifies you the moment a BUY, SELL, or error happens, while this app is open or running in the background. For alerts even when the app is fully closed, see Push Notifications below.
+        </div>
+      </div>
+      <div class="card">
+        <h3>Push Notifications (works app-closed)</h3>
+        <div class="empty-hint" style="text-align:left; padding:0 0 12px;">
+          Real push, delivered even with this app fully closed — via <b>ntfy</b>, a free, no-signup notification relay. One-time setup:
+        </div>
+        <div class="empty-hint" style="text-align:left; padding:0;">
+          1. Install the <b>ntfy</b> app (Android/iOS), or open ntfy.sh in a browser<br>
+          2. Pick a hard-to-guess topic name (like a password — anyone who knows it can read your alerts), e.g. <span class="mono">endgame-x7k2p9</span><br>
+          3. Subscribe to that exact topic name in the ntfy app<br>
+          4. In Cloudflare, add a Worker secret named <span class="mono">NTFY_TOPIC</span> with that same topic name, and redeploy
+        </div>
+        <div class="empty-hint" style="text-align:left; padding:12px 0 0;">
+          That's it — no code changes needed. BUY, SELL, error, and kill-switch events will start arriving as real notifications.
         </div>
       </div>
       <div class="card">
@@ -588,6 +608,32 @@ function refreshPositions(previewOnly){
       list.forEach(function(p){ renderPositionRow(p, target); });
     }
   }).catch(function(err){ toast(err.message); });
+  if(!previewOnly) refreshProtectiveOrders();
+}
+
+function refreshProtectiveOrders(){
+  var el = document.getElementById('protectiveList');
+  if(!el) return;
+  apiFetch('/api/protective-orders').then(function(data){
+    var list = data.protective || [];
+    el.innerHTML = '';
+    if(list.length === 0){
+      el.innerHTML = '<div class="empty-hint">No stop-loss/take-profit orders currently active.</div>';
+      return;
+    }
+    list.forEach(function(p){
+      var row = document.createElement('div');
+      row.className = 'item';
+      var m = marketFor(p.symbol);
+      var parts = [];
+      if(p.stopPrice) parts.push('Stop ' + fmtMoney(p.stopPrice));
+      if(p.targetPrice) parts.push('Target ' + fmtMoney(p.targetPrice));
+      row.innerHTML =
+        '<div class="left"><div class="sym">' + (m ? m.name : p.symbol) + '</div><div class="sub">' + p.symbol + '</div></div>' +
+        '<div class="right"><div class="price mono">' + parts.join(' · ') + '</div></div>';
+      el.appendChild(row);
+    });
+  }).catch(function(){ /* non-critical, fail quietly */ });
 }
 
 function updatePLSummary(list){
