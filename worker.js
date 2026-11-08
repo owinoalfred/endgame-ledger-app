@@ -133,7 +133,7 @@ if(pageToken)q.set('page_token',pageToken);
 let b;let chunk;
 if(isCrypto(m)){q.set('symbols',m.symbol);b=await requireOK(alpaca(`${CRYPTO_DATA_BASE}/bars?${q.toString()}`,env),`Crypto bars ${m.symbol}`);chunk=(b.bars||{})[m.symbol]||[];}
 else{
-q.set('adjustment','raw');q.set('feed','sip');
+q.set('adjustment','raw');q.set('feed','iex');
 b=await requireOK(alpaca(`${DATA_BASE}/v2/stocks/${encodeURIComponent(m.symbol)}/bars?${q.toString()}`,env),`Stock SIP bars ${m.symbol}`);
 chunk=b.bars||[];
 }
@@ -145,7 +145,7 @@ return rows.map(x=>({t:x.t,o:+x.o,h:+x.h,l:+x.l,c:+x.c,v:+x.v})).filter(x=>x.t&&
 async function bars(env,m,tf,limit){return historicalBars(env,m,tf,limit);}
 async function quote(env,m){
 if(isCrypto(m)){const b=await requireOK(alpaca(`${CRYPTO_DATA_BASE}/latest/quotes?symbols=${encodeURIComponent(m.symbol)}`,env),'Crypto quote');const q=(b.quotes||{})[m.symbol]||{};return{bid:+q.bp,ask:+q.ap,mid:(+q.bp&&+q.ap)?(+q.bp + +q.ap)/2:(+q.ap||+q.bp),ts:q.t};}
-const b=await requireOK(alpaca(`${DATA_BASE}/v2/stocks/${encodeURIComponent(m.symbol)}/quotes/latest?feed=sip`,env),'Stock quote');const q=b.quote||b;return{bid:+q.bp,ask:+q.ap,mid:(+q.bp&&+q.ap)?(+q.bp + +q.ap)/2:(+q.ap||+q.bid),ts:q.t};
+const b=await requireOK(alpaca(`${DATA_BASE}/v2/stocks/${encodeURIComponent(m.symbol)}/quotes/latest?feed=iex`,env),'Stock quote');const q=b.quote||b;return{bid:+q.bp,ask:+q.ap,mid:(+q.bp&&+q.ap)?(+q.bp + +q.ap)/2:(+q.ap||+q.bid),ts:q.t};
 }
 
 function sma(v,n){if(v.length<n)return null;return v.slice(-n).reduce((a,b)=>a+b,0)/n;}
@@ -631,7 +631,29 @@ if(p==='/api/bot/toggle'&&req.method==='POST'){const x=await req.json().catch(()
 if(p==='/api/kill/status'){return json({active:(await kvGet(env,'kill','0'))==='1'});}
 if(p==='/api/kill/activate'&&req.method==='POST'){const x=await req.json().catch(()=>({}));await kvPut(env,'kill','1');let canceled=0;let preservedProtection=0;if(x.cancelOpenOrders){const[openOrders,currentPositions]=await Promise.all([orders(env,'open'),positions(env)]);const protectedIds=new Set();for(const pos of currentPositions){for(const po of activeProtectionOrders(pos,openOrders)){if(po.id)protectedIds.add(po.id);}}for(const o of openOrders){if(protectedIds.has(o.id)){preservedProtection++;continue;}const r=await alpaca(`${ALPACA_BASE}/v2/orders/${o.id}`,env,{method:'DELETE'});if(r.status<300)canceled++;}}await log(env,'SYSTEM','HALT','Kill switch activated',{canceled,preservedProtection});return json({active:true,canceled,preservedProtection});}
 if(p==='/api/kill/deactivate'&&req.method==='POST'){await kvPut(env,'kill','0');await log(env,'SYSTEM','SKIP','Kill switch deactivated');return json({active:false});}
-return json({error:'Not found'},404);
+  if(p==='/api/cleanup'&&req.method==='POST'){
+    const x=await req.json().catch(()=>({}));
+    const symbol=x.symbol;
+    const force=x.force||false;
+    if(!symbol) return json({error:'Symbol required'},400);
+    const pos=(await positions(env)).find(p=>positionKey(p)===symbol);
+    if(!pos) return json({error:'Position not found'},404);
+    const open=await orders(env,'open');
+    let canceled=0;
+    if(force){
+      for(const o of open.filter(o=>positionKey(o)===symbol)){
+        const r=await alpaca(`${ALPACA_BASE}/v2/orders/${o.id}`,env,{method:'DELETE'});
+        if(r.status<300)canceled++;
+      }
+    }
+    const qty=Math.abs(+pos.qty||0);
+    if(!qty) return json({status:'already_flat'});
+    const clientOrderId=`eg-cleanup-${symbol.replace(/\W/g,'')}-${Date.now()}`;
+    const r=await alpaca(`${ALPACA_BASE}/v2/orders`,env,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:pos.symbol,qty,side:'sell',type:'market',time_in_force:isCrypto(marketFor(symbol))?'gtc':'day',client_order_id:clientOrderId})});
+    await log(env,symbol,'SELL',`Force cleanup ${force?'(canceled '+canceled+' orders)':''} ${qty} shares`,{state:'FORCE_CLEANUP',canceled});
+    return json({status:r.status<300?'submitted':'failed',order:r.body,canceled});
+  }
+  return json({error:'Not found'},404);
 }catch(e){console.error(e);return json({error:String(e)},500);}
 },
 async scheduled(event,env){

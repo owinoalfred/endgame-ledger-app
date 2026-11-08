@@ -1276,6 +1276,15 @@
     </div>
   </header>
 
+  <nav class="tabbar">
+    <button class="tab-btn active" data-tab="account"><span class="ic">◈</span>Account</button>
+    <button class="tab-btn" data-tab="markets"><span class="ic">☆</span>Markets</button>
+    <button class="tab-btn" data-tab="positions"><span class="ic">▤</span>Positions</button>
+    <button class="tab-btn" data-tab="orders"><span class="ic">≡</span>Orders</button>
+    <button class="tab-btn" data-tab="bot"><span class="ic">◆</span>Bot</button>
+    <button class="tab-btn" data-tab="settings"><span class="ic">⚙</span>Settings</button>
+  </nav>
+
   <section class="account-band view active" id="view-account">
     <div class="band-cell">
       <div class="band-label"><span>Portfolio Value</span><span style="color:var(--cyan);">EQUITY</span></div>
@@ -1713,14 +1722,24 @@ function renderMarketsList() {
     const score = a ? a.signal.score : null;
     const regime = a ? a.signal.regime : '—';
     const spread = a ? a.spreadPct : null;
+    const hasError = a && a.error;
+    const isEquity = m.assetClass === 'us_equity';
+    let subText = '';
+    if (hasError) {
+      subText = isEquity ? 'SIP Unavailable' : `Error: ${a.error}`;
+    } else if (a) {
+      subText = `Score ${a.signal.score} · ${a.signal.regime}`;
+    } else {
+      subText = 'Loading…';
+    }
     return `<div class="item" data-symbol="${esc(m.symbol)}">
       <div class="left">
         <div class="sym">${esc(m.symbol)} ${m.assetClass==='crypto'?'●':''} <span style="font-weight:400;color:var(--text-dim);font-size:10px;">${esc(m.name)}</span></div>
-        <div class="sub">${esc(m.cluster)} · ${a?`Score ${a.signal.score} · ${a.signal.regime}`:'Loading…'}</div>
+        <div class="sub">${esc(m.cluster)} · ${subText}</div>
       </div>
       <div class="right">
-        <div class="price" id="px-${esc(m.symbol)}">—</div>
-        <div class="change" id="ch-${esc(m.symbol)}">${spread!=null?pct(spread*100)+' spread':''}</div>
+        <div class="price" id="px-${esc(m.symbol)}">${hasError && isEquity ? '—' : '—'}</div>
+        <div class="change" id="ch-${esc(m.symbol)}">${spread!=null?pct(spread*100)+' spread':(hasError && isEquity ? 'SIP required' : '')}</div>
       </div>
     </div>`;
   }).join('');
@@ -1807,14 +1826,19 @@ function renderPositionsList(ps) {
     const pl = +p.unrealized_pl || 0;
     const plpc = +p.unrealized_plpc || 0;
     const prot = p.protected === false;
+    const mkt = state.markets.find(x => x.symbol === p.symbol);
+    const offUniverse = !mkt;
+    const qtyAvail = +p.qty_available || 0;
+    const hasPendingOrder = qtyAvail < Math.abs(+p.qty || 0);
     return `<div class="item" data-symbol="${esc(p.symbol)}">
       <div class="left">
-        <div class="sym">${esc(p.symbol)} ${prot?'<span class="cluster-tag" style="background:var(--red-dim);color:var(--red);border-color:var(--red);">UNPROTECTED</span>':''}</div>
-        <div class="sub">${(+p.qty).toFixed(6)} · avg ${money(p.avg_entry_price)}</div>
+        <div class="sym">${esc(p.symbol)} ${prot?'<span class="cluster-tag" style="background:var(--red-dim);color:var(--red);border-color:var(--red);">UNPROTECTED</span>':''} ${offUniverse?'<span class="cluster-tag" style="background:var(--amber-dim);color:var(--amber);border-color:var(--amber);">OFF-UNIVERSE</span>':''}</div>
+        <div class="sub">${(+p.qty).toFixed(6)} · avg ${money(p.avg_entry_price)} ${hasPendingOrder?`· avail ${qtyAvail}`:''}</div>
       </div>
       <div class="right">
         <div class="price">${money(p.market_value)}</div>
         <div class="change ${pl>=0?'pos':'neg'}" id="pl-${esc(p.symbol)}">${money(pl)} (${pct(plpc)})</div>
+        ${offUniverse ? `<button class="btn ghost" style="margin-top:4px;padding:2px 6px;font-size:9px;" onclick="forceCleanup('${esc(p.symbol)}')">Force Cleanup</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -1824,10 +1848,20 @@ function renderPositionsList(ps) {
     lastPosPL[p.symbol] = +p.unrealized_pl || 0;
     if (prev != null && el) flash(el, (+p.unrealized_pl||0) > prev ? 'up' : (+p.unrealized_pl||0) < prev ? 'down' : 'telemetry');
   });
-  list.querySelectorAll('.item').forEach(el => el.onclick = () => {
+  list.querySelectorAll('.item').forEach(el => el.onclick = (e) => {
+    if (e.target.tagName === 'BUTTON') return;
     const p = ps.find(x => x.symbol === el.dataset.symbol);
     if (p) selectPosition(p);
   });
+}
+
+async function forceCleanup(symbol) {
+  if (!confirm(`Force cleanup ${symbol}? This will cancel any blocking orders and flatten the position.`)) return;
+  try {
+    await api('/api/cleanup', { method: 'POST', body: { symbol, force: true } });
+    toast(`Force cleanup initiated for ${symbol}`, 'success');
+    refreshDashboard();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 async function refreshStrategy() {
