@@ -2390,14 +2390,24 @@ document.querySelectorAll('.tab-btn[data-tab]').forEach(b => b.onclick = () => {
   document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('active'));
   b.classList.add('active');
   const tab = b.dataset.tab;
+  // Hide all top-level views
   document.querySelectorAll('#view-account,#view-markets,#view-positions,#view-orders,#view-bot').forEach(v => v.style.display = 'none');
   if (tab === 'settings') {
+    // Settings is a workspace pane inside view-orders
     document.getElementById('view-orders').style.display = '';
     showWorkspace('settings');
-  } else {
-    document.getElementById('view-' + tab).style.display = '';
-    if (tab === 'orders') showWorkspace('orders');
-    if (tab === 'bot') refreshBot();
+  } else if (tab === 'orders') {
+    document.getElementById('view-orders').style.display = '';
+    showWorkspace('orders');
+  } else if (tab === 'bot') {
+    document.getElementById('view-bot').style.display = '';
+    refreshBot();
+  } else if (tab === 'account') {
+    document.getElementById('view-account').style.display = '';
+  } else if (tab === 'markets') {
+    document.getElementById('view-markets').style.display = '';
+  } else if (tab === 'positions') {
+    document.getElementById('view-positions').style.display = '';
   }
 });
 
