@@ -2391,12 +2391,14 @@ document.querySelectorAll('.tab-btn[data-tab]').forEach(b => b.onclick = () => {
   b.classList.add('active');
   const tab = b.dataset.tab;
   document.querySelectorAll('#view-account,#view-markets,#view-positions,#view-orders,#view-bot').forEach(v => v.style.display = 'none');
-  document.getElementById('view-' + tab).style.display = '';
-  if (tab === 'markets') { document.getElementById('view-markets').style.display = ''; }
-  if (tab === 'positions') { document.getElementById('view-positions').style.display = ''; }
-  if (tab === 'orders') { document.getElementById('view-orders').style.display = ''; showWorkspace('orders'); }
-  if (tab === 'bot') { document.getElementById('view-bot').style.display = ''; refreshBot(); }
-  if (tab === 'account') { document.getElementById('view-account').style.display = ''; }
+  if (tab === 'settings') {
+    document.getElementById('view-orders').style.display = '';
+    showWorkspace('settings');
+  } else {
+    document.getElementById('view-' + tab).style.display = '';
+    if (tab === 'orders') showWorkspace('orders');
+    if (tab === 'bot') refreshBot();
+  }
 });
 
 document.getElementById('cfgUrl').value = cfg.url || '';
