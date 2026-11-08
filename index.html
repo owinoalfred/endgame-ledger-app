@@ -1703,8 +1703,7 @@ async function loadMarkets() {
   document.getElementById('hdrMarketCount').textContent = state.markets.length;
 }
 
-function signalBadge(s) { return `<span class="pill ${s>=70?'good':s>=50?'warn':'bad'}">${s}</span>`; }
-let strategyAnalysis = [];
+let lastMktPrice = {}, lastMktChange = {};
 
 function renderMarketsList() {
   const list = document.getElementById('marketsList');
@@ -1725,6 +1724,25 @@ function renderMarketsList() {
       </div>
     </div>`;
   }).join('');
+  state.markets.forEach(m => {
+    const pxEl = document.getElementById('px-' + esc(m.symbol));
+    const chEl = document.getElementById('ch-' + esc(m.symbol));
+    const a = strategyAnalysis.find(x => x.symbol === m.symbol);
+    if (a && a.quote && a.quote.mid) {
+      const mid = a.quote.mid;
+      const prev = lastMktPrice[m.symbol];
+      lastMktPrice[m.symbol] = mid;
+      pxEl.textContent = formatPrice(mid);
+      if (prev != null) flash(pxEl, mid > prev ? 'up' : mid < prev ? 'down' : 'telemetry');
+    }
+    if (a && a.spreadPct != null) {
+      const sp = a.spreadPct * 10000;
+      const prev = lastMktChange[m.symbol];
+      lastMktChange[m.symbol] = sp;
+      chEl.textContent = sp.toFixed(1) + ' bps';
+      if (prev != null) flash(chEl, sp > prev ? 'up' : sp < prev ? 'down' : 'telemetry');
+    }
+  });
   list.querySelectorAll('.item').forEach(el => el.onclick = () => selectMarket(el.dataset.symbol));
 }
 
@@ -1754,16 +1772,24 @@ async function refreshDashboard() {
     const d = await api('/api/dashboard');
     state.dashboard = d;
     const eq = +d.account.equity, dr = +d.dailyReturn;
-    document.getElementById('acctEquity').textContent = money(eq);
-    document.getElementById('acctEquity').className = 'equity-figure mono ' + (dr>=0?'pos-figure':'neg-figure');
-    document.getElementById('acctDelta').textContent = pct(dr) + ' since day start';
-    document.getElementById('acctDelta').className = 'equity-delta mono ' + (dr>=0?'pos':'neg');
+    const equityEl = document.getElementById('acctEquity');
+    const deltaEl = document.getElementById('acctDelta');
+    const plEl = document.getElementById('posTotalPL');
+    equityEl.textContent = money(eq);
+    equityEl.className = 'equity-figure mono ' + (dr>=0?'pos-figure':'neg-figure');
+    deltaEl.textContent = pct(dr) + ' since day start';
+    deltaEl.className = 'equity-delta mono ' + (dr>=0?'pos':'neg');
+    if (lastEquity != null) flash(equityEl, eq > lastEquity ? 'up' : eq < lastEquity ? 'down' : 'telemetry');
+    lastEquity = eq;
     document.getElementById('acctCash').textContent = money(d.account.cash);
     document.getElementById('acctBP').textContent = money(d.account.buying_power);
     const gross = (d.positions||[]).reduce((s,p)=>s+Math.abs(+p.market_value||0),0)/(eq||1);
     document.getElementById('posTotalMV').textContent = money((d.positions||[]).reduce((s,p)=>s+Math.abs(+p.market_value||0),0));
-    document.getElementById('posTotalPL').textContent = money((d.positions||[]).reduce((s,p)=>s+(+p.unrealized_pl||0),0));
-    document.getElementById('posTotalPL').className = 'equity-figure mono ' + ((d.positions||[]).reduce((s,p)=>s+(+p.unrealized_pl||0),0)>=0?'pos-figure':'neg-figure');
+    const totalPL = (d.positions||[]).reduce((s,p)=>s+(+p.unrealized_pl||0),0);
+    plEl.textContent = money(totalPL);
+    plEl.className = 'equity-figure mono ' + (totalPL>=0?'pos-figure':'neg-figure');
+    if (lastPL.total != null) flash(plEl, totalPL > lastPL.total ? 'up' : totalPL < lastPL.total ? 'down' : 'telemetry');
+    lastPL.total = totalPL;
     document.getElementById('posCount').textContent = (d.positions||[]).length;
     renderPositionsList(d.positions||[]);
     const r = d.risk, level = d.riskLevel;
@@ -1788,10 +1814,16 @@ function renderPositionsList(ps) {
       </div>
       <div class="right">
         <div class="price">${money(p.market_value)}</div>
-        <div class="change ${pl>=0?'pos':'neg'}">${money(pl)} (${pct(plpc)})</div>
+        <div class="change ${pl>=0?'pos':'neg'}" id="pl-${esc(p.symbol)}">${money(pl)} (${pct(plpc)})</div>
       </div>
     </div>`;
   }).join('');
+  ps.forEach(p => {
+    const el = document.getElementById('pl-' + esc(p.symbol));
+    const prev = lastPosPL[p.symbol];
+    lastPosPL[p.symbol] = +p.unrealized_pl || 0;
+    if (prev != null && el) flash(el, (+p.unrealized_pl||0) > prev ? 'up' : (+p.unrealized_pl||0) < prev ? 'down' : 'telemetry');
+  });
   list.querySelectorAll('.item').forEach(el => el.onclick = () => {
     const p = ps.find(x => x.symbol === el.dataset.symbol);
     if (p) selectPosition(p);
@@ -2033,6 +2065,15 @@ function formatPrice(v) {
   return '$' + v.toFixed(4);
 }
 
+function flash(el, type) {
+  if (!el) return;
+  el.classList.remove('flash-up', 'flash-down', 'flash-telemetry');
+  void el.offsetWidth;
+  el.classList.add('flash-' + type);
+}
+
+let lastMid = {}, lastEquity = null, lastPL = {}, lastPosPL = {};
+
 document.getElementById('btnCanvasModePrice').onclick = () => setCanvasMode('price');
 document.getElementById('btnCanvasModeSpread').onclick = () => setCanvasMode('spread');
 function setCanvasMode(mode) {
@@ -2068,16 +2109,26 @@ function ema(arr, n) {
 }
 
 function updateReadout(q) {
-  document.getElementById('roBid').textContent = q.bid ? formatPrice(q.bid) : '—';
-  document.getElementById('roAsk').textContent = q.ask ? formatPrice(q.ask) : '—';
-  document.getElementById('roMid').textContent = q.mid ? formatPrice(q.mid) : '—';
+  const bidEl = document.getElementById('roBid');
+  const askEl = document.getElementById('roAsk');
+  const midEl = document.getElementById('roMid');
+  const spreadEl = document.getElementById('roSpread');
+  const prevMid = lastMid[telemetrySymbol];
+  lastMid[telemetrySymbol] = q.mid;
+  bidEl.textContent = q.bid ? formatPrice(q.bid) : '—';
+  askEl.textContent = q.ask ? formatPrice(q.ask) : '—';
+  midEl.textContent = q.mid ? formatPrice(q.mid) : '—';
   if (q.bid && q.ask) {
     const sp = ((q.ask - q.bid) / ((q.ask+q.bid)/2) * 10000).toFixed(1);
-    document.getElementById('roSpread').textContent = sp + ' bps';
+    spreadEl.textContent = sp + ' bps';
   }
   document.getElementById('roTicks').textContent = (telemetryData[telemetrySymbol]?.mid?.length || 0);
   document.getElementById('hdrActiveSym').textContent = telemetrySymbol;
   document.getElementById('hdrActiveSpread').textContent = (q.bid && q.ask) ? (((q.ask-q.bid)/((q.ask+q.bid)/2)*10000).toFixed(1)+' bps') : '—';
+  if (prevMid != null && q.mid != null) {
+    flash(midEl, q.mid > prevMid ? 'up' : q.mid < prevMid ? 'down' : 'telemetry');
+    flash(spreadEl, 'telemetry');
+  }
 }
 
 setInterval(pollTelemetry, 1000);
@@ -2114,13 +2165,26 @@ async function refreshPerformance() {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+let lastBotRisk = {}, lastBotUnprotected = null;
+
 async function refreshBot() {
   try {
     const d = await api('/api/bot/status');
     document.getElementById('botStatusLine').innerHTML = `<span class="conn-dot ${d.manualHalt||d.killActive?'err':'ok'}"></span>${d.manualHalt?'PAUSED':d.killActive?'KILL ACTIVE':'RUNNING'} · Recon: ${d.reconciliationHalt?'HALT':'healthy'} · Risk Lv: ${d.riskLevel} · Trades: ${d.tradeCount}/${d.config.maxTradesPerDay}`;
     document.getElementById('btnBotToggle').textContent = d.manualHalt ? 'Resume Autopilot' : 'Pause Autopilot';
     const rb = d.riskBook || {};
-    document.getElementById('killStatusLine').innerHTML = `<span class="conn-dot ${d.killActive?'err':'ok'}"></span>${d.killActive?'KILL SWITCH ACTIVE — All trading halted':'Kill switch inactive'} · Open Risk: ${money(rb.totalRisk)} · Unprotected: ${rb.unprotected||0}`;
+    const riskEl = document.getElementById('killStatusLine');
+    riskEl.innerHTML = `<span class="conn-dot ${d.killActive?'err':'ok'}"></span>${d.killActive?'KILL SWITCH ACTIVE — All trading halted':'Kill switch inactive'} · Open Risk: ${money(rb.totalRisk)} · Unprotected: ${rb.unprotected||0}`;
+    if (lastBotRisk.totalRisk != null && rb.totalRisk != null) {
+      const riskNum = +rb.totalRisk;
+      const prev = lastBotRisk.totalRisk;
+      flash(riskEl, riskNum > prev ? 'up' : riskNum < prev ? 'down' : 'telemetry');
+    }
+    lastBotRisk = {totalRisk: +rb.totalRisk};
+    if (lastBotUnprotected != null && rb.unprotected != null) {
+      flash(riskEl, rb.unprotected > lastBotUnprotected ? 'down' : rb.unprotected < lastBotUnprotected ? 'up' : 'telemetry');
+    }
+    lastBotUnprotected = rb.unprotected;
     document.getElementById('btnKillToggle').textContent = d.killActive ? '🔓 Unlock Kill Switch' : '🛑 Kill Switch — Stop All Trading';
     document.getElementById('btnKillToggle').classList.toggle('active-kill', d.killActive);
     document.getElementById('botLog').innerHTML = (d.log||[]).map(x => `<div class="row-list item" style="border:none;padding:6px 0;"><div class="left"><div class="sym">${esc(x.symbol)} · ${esc(x.action)}</div><div class="sub">${esc(x.note)}</div></div><div class="right"><span class="small muted">${new Date(x.t).toLocaleTimeString()}</span></div></div>`).join('') || '<div class="empty-hint">No decisions yet.</div>';
