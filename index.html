@@ -1272,17 +1272,17 @@
     <div class="header-actions">
       <button class="btn ghost install-btn" id="btnInstall" style="display:none;">⤓ Install</button>
       <div class="badge-paper">Paper Trading</div>
-      <button class="tab-btn gear-btn" data-tab="settings" title="Settings"><span class="ic">⚙</span> CFG</button>
+      <button class="tab-btn gear-btn" data-tab="settings" title="Settings" onclick="openSettings()"><span class="ic">⚙</span> CFG</button>
     </div>
   </header>
 
   <nav class="tabbar">
-    <button class="tab-btn active" data-tab="account"><span class="ic">◈</span>Account</button>
-    <button class="tab-btn" data-tab="markets"><span class="ic">☆</span>Markets</button>
-    <button class="tab-btn" data-tab="positions"><span class="ic">▤</span>Positions</button>
-    <button class="tab-btn" data-tab="orders"><span class="ic">≡</span>Orders</button>
-    <button class="tab-btn" data-tab="bot"><span class="ic">◆</span>Bot</button>
-    <button class="tab-btn" data-tab="settings"><span class="ic">⚙</span>Settings</button>
+    <button class="tab-btn active" data-tab="account" onclick="openTab('account')"><span class="ic">◈</span>Account</button>
+    <button class="tab-btn" data-tab="markets" onclick="openTab('markets')"><span class="ic">☆</span>Markets</button>
+    <button class="tab-btn" data-tab="positions" onclick="openTab('positions')"><span class="ic">▤</span>Positions</button>
+    <button class="tab-btn" data-tab="orders" onclick="openTab('orders')"><span class="ic">≡</span>Orders</button>
+    <button class="tab-btn" data-tab="bot" onclick="openTab('bot')"><span class="ic">◆</span>Bot</button>
+    <button class="tab-btn" data-tab="settings" onclick="openSettings()"><span class="ic">⚙</span>Settings</button>
   </nav>
 
   <section class="account-band view active" id="view-account">
@@ -1412,10 +1412,10 @@
       <section class="card panel-workspace view" id="view-orders">
         <div class="panel-hdr">
           <div class="workspace-tabs" id="workspaceTabs">
-            <button type="button" class="ws-tab active" data-ws="orders">Orders</button>
-            <button type="button" class="ws-tab" data-ws="journal">Trade Journal</button>
-            <button type="button" class="ws-tab" data-ws="botlog">Bot Telemetry</button>
-            <button type="button" class="ws-tab" data-ws="settings">Backend Config</button>
+            <button type="button" class="ws-tab active" data-ws="orders" onclick="showWorkspace('orders')">Orders</button>
+            <button type="button" class="ws-tab" data-ws="journal" onclick="showWorkspace('journal')">Trade Journal</button>
+            <button type="button" class="ws-tab" data-ws="botlog" onclick="showWorkspace('botlog')">Bot Telemetry</button>
+            <button type="button" class="ws-tab" data-ws="settings" onclick="showWorkspace('settings')">Backend Config</button>
           </div>
           <div class="toggle-pair" id="ordersSubToggle" style="display:none;">
             <button data-sub="orders" class="active-neutral">Orders</button>
@@ -2232,6 +2232,31 @@ function showWorkspace(ws) {
   if (ws === 'orders') refreshOrders();
   else if (ws === 'journal') refreshPerformance();
   else if (ws === 'botlog') refreshBot();
+}
+
+function openSettings() {
+  document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('#view-account,#view-markets,#view-positions,#view-orders,#view-bot').forEach(v => v.style.display = 'none');
+  document.getElementById('view-orders').style.display = '';
+  showWorkspace('settings');
+}
+
+function openTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('#view-account,#view-markets,#view-positions,#view-orders,#view-bot').forEach(v => v.style.display = 'none');
+  if (tab === 'orders') {
+    document.getElementById('view-orders').style.display = '';
+    showWorkspace('orders');
+  } else if (tab === 'bot') {
+    document.getElementById('view-bot').style.display = '';
+    refreshBot();
+  } else if (tab === 'account') {
+    document.getElementById('view-account').style.display = '';
+  } else if (tab === 'markets') {
+    document.getElementById('view-markets').style.display = '';
+  } else if (tab === 'positions') {
+    document.getElementById('view-positions').style.display = '';
+  }
 }
 document.querySelectorAll('.ws-tab').forEach(b => b.onclick = () => showWorkspace(b.dataset.ws));
 
