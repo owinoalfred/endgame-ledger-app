@@ -1,0 +1,37 @@
+# Endgame Ledger Backend v13 — Full Wrangler Configuration
+
+name = "endgame-ledger-backend"
+main = "worker.js"
+compatibility_date = "2026-08-18"
+
+# ── Cron Triggers ──
+[triggers]
+crons = ["*/15 * * * *"]
+
+# ── KV Namespace ──
+[[kv_namespaces]]
+binding = "LEDGER_KV"
+id = "3ee51df514e54ead8e06c7ae9a138f80"
+
+# ── Durable Object Binding ──
+[[durable_objects.bindings]]
+name = "STRATEGY_LOCK"
+class_name = "StrategyLock"
+
+# ── Durable Object Exports ──
+[exports.StrategyLock]
+type = "durable-object"
+storage = "sqlite"
+
+# ── Observability ──
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+persist = true
+head_sampling_rate = 1
+
+# ── Secrets (preserved automatically by wrangler) ──
+# ALPACA_KEY_ID, ALPACA_SECRET_KEY, APP_TOKEN
