@@ -1,5 +1,5 @@
 const CACHE='endgame-ledger-v13';
-const ASSETS=['./','./index.html','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png'];
+const ASSETS=['./','./index.html','./manifest.json','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',event=>{
   event.waitUntil(
     caches.open(CACHE)
@@ -16,7 +16,6 @@ self.addEventListener('activate',event=>{
 });
 self.addEventListener('fetch',event=>{
   const u=new URL(event.request.url);
-  if(u.origin!==location.origin)return;
   event.respondWith(
     fetch(event.request)
       .then(r=>{

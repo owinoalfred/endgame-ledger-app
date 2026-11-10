@@ -37,6 +37,12 @@
     --gold-soft: #67E8F9;
     --ink: #04060A;
     --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    --glow-cyan: 0 0 10px rgba(34, 211, 238, 0.5), 0 0 20px rgba(34, 211, 238, 0.3);
+    --glow-green: 0 0 10px rgba(16, 185, 129, 0.5), 0 0 20px rgba(16, 185, 129, 0.3);
+    --glow-red: 0 0 10px rgba(239, 68, 68, 0.5), 0 0 20px rgba(239, 68, 68, 0.3);
+    --glow-amber: 0 0 10px rgba(245, 158, 11, 0.5), 0 0 20px rgba(245, 158, 11, 0.3);
+    --glow-cyan-soft: rgba(34, 211, 238, 0.15);
+    --glow-green-soft: rgba(16, 185, 129, 0.15);
   }
 
   * {
@@ -844,6 +850,25 @@
     cursor: not-allowed;
   }
 
+  /* ── Cyberpunk glow ── */
+  .btn.primary { box-shadow: var(--glow-cyan); }
+  .btn.kill-btn.active-kill { box-shadow: var(--glow-red); }
+  .btn.buy { box-shadow: var(--glow-green); }
+  .btn.sell { box-shadow: var(--glow-red); }
+  .tab-btn.active { box-shadow: var(--glow-cyan); }
+  .tab-btn.gear-btn.active { box-shadow: var(--glow-amber); }
+  .brandmark span { text-shadow: var(--glow-cyan); }
+  .panel-hdr { box-shadow: 0 0 8px var(--glow-cyan-soft); }
+  .conn-dot.ok { box-shadow: var(--glow-green); }
+  .conn-dot.err { box-shadow: var(--glow-red); }
+  .btn.primary:active, .tab-btn.active:active { box-shadow: none; }
+
+  @keyframes pulseGlow {
+    0%, 100% { box-shadow: var(--glow-cyan); opacity: 1; }
+    50% { box-shadow: 0 0 20px rgba(34, 211, 238, 0.8), 0 0 40px rgba(34, 211, 238, 0.5); opacity: 0.9; }
+  }
+  .btn.primary.pulse, .tab-btn.active.pulse { animation: pulseGlow 2s infinite; }
+
   .btn-row {
     display: flex;
     gap: 6px;
@@ -1270,6 +1295,7 @@
     </div>
 
     <div class="header-actions">
+      <button class="btn ghost" id="btnRefresh" title="Refresh" onclick="refreshDashboard().catch(()=>{});loadMarkets().catch(()=>{});refreshBot().catch(()=>{});refreshStrategy().catch(()=>{});"><span class="ic">↻</span></button>
       <button class="btn ghost install-btn" id="btnInstall" style="display:none;">⤓ Install</button>
       <div class="badge-paper">Paper Trading</div>
       <button class="tab-btn gear-btn" data-tab="settings" title="Settings" onclick="openSettings()"><span class="ic">⚙</span> CFG</button>
@@ -1281,6 +1307,7 @@
     <button class="tab-btn" data-tab="markets" onclick="openTab('markets')"><span class="ic">☆</span>Markets</button>
     <button class="tab-btn" data-tab="positions" onclick="openTab('positions')"><span class="ic">▤</span>Positions</button>
     <button class="tab-btn" data-tab="orders" onclick="openTab('orders')"><span class="ic">≡</span>Orders</button>
+    <button class="tab-btn" data-tab="journal" onclick="showWorkspace('journal')"><span class="ic">📓</span>Journal</button>
     <button class="tab-btn" data-tab="bot" onclick="openTab('bot')"><span class="ic">◆</span>Bot</button>
     <button class="tab-btn" data-tab="settings" onclick="openSettings()"><span class="ic">⚙</span>Settings</button>
   </nav>
@@ -1453,7 +1480,7 @@
             <div class="row-list" id="botLog"><div class="empty-hint">No activity yet.</div></div>
           </div>
 
-          <div id="view-settings" class="ws-pane view" style="display:none;">
+          <div id="view-settings" class="ws-pane view">
             <div class="settings-form-grid" style="display:grid; grid-template-columns: 1fr 1fr 180px; gap:8px; align-items:end;">
               <div>
                 <label class="field" style="margin-top:0;">Worker URL</label>
@@ -1580,12 +1607,13 @@
 const KEY = 'endgame_v12_config';
 let cfg = JSON.parse(localStorage.getItem(KEY) || '{}');
 let state = { markets: [], dashboard: null, selectedMarket: null, selectedPosition: null };
+let strategyAnalysis = [];
 
 const NOTIF_KEY = 'endgame_v12_notifications';
 let notifications = JSON.parse(localStorage.getItem(NOTIF_KEY) || '[]').map(n => ({...n, t: new Date(n.t)}));
 let deferredInstallPrompt = null;
 
-function esc(x) { return String(x ?? '').replace(/[&<>"']/g, c => ({'&':'&','<':'<','>':'>','"':'"',"'":'''}[c])); }
+function esc(x) { return String(x ?? '').replace(/[&<>"']/g, c => ({'&':'&','<':'<','>':'>','"':'"',"'":"'"}[c])); }
 function money(x) { x = +x; return Number.isFinite(x) ? (x<0?'-':'') + '$' + Math.abs(x).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'; }
 function pct(x) { x = +x; return Number.isFinite(x) ? (x*100).toFixed(2) + '%' : '—'; }
 function finite(x) { return Number.isFinite(+x); }
@@ -1691,6 +1719,7 @@ async function api(path, opt={}) {
 }
 function connected(ok, text) {
   const e = document.getElementById('conn');
+  if (!e) return;
   e.textContent = text;
   e.className = 'pill ' + (ok ? 'good' : 'bad');
 }
@@ -1711,16 +1740,16 @@ function renderMarketsList() {
   if (!state.markets.length) { list.innerHTML = '<div class="empty-hint">Connect in Settings to load markets.</div>'; return; }
   list.innerHTML = state.markets.map(m => {
     const a = strategyAnalysis.find(x => x.symbol === m.symbol);
-    const score = a ? a.signal.score : null;
-    const regime = a ? a.signal.regime : '—';
-    const spread = a ? a.spreadPct : null;
-    const hasError = a && a.error;
+    const score = a?.signal?.score ?? null;
+    const regime = a?.signal?.regime ?? '—';
+    const spread = a?.spreadPct ?? null;
+    const hasError = a?.error;
     const isEquity = m.assetClass === 'us_equity';
     let subText = '';
     if (hasError) {
       subText = isEquity ? 'SIP Unavailable' : `Error: ${a.error}`;
     } else if (a) {
-      subText = `Score ${a.signal.score} · ${a.signal.regime}`;
+      subText = `Score ${a?.signal?.score ?? '—'} · ${a?.signal?.regime ?? '—'}`;
     } else {
       subText = 'Loading…';
     }
@@ -1730,7 +1759,7 @@ function renderMarketsList() {
         <div class="sub">${esc(m.cluster)} · ${subText}</div>
       </div>
       <div class="right">
-        <div class="price" id="px-${esc(m.symbol)}">${hasError && isEquity ? '—' : '—'}</div>
+        <div class="price" id="px-${esc(m.symbol)}">—</div>
         <div class="change" id="ch-${esc(m.symbol)}">${spread!=null?pct(spread*100)+' spread':(hasError && isEquity ? 'SIP required' : '')}</div>
       </div>
     </div>`;
@@ -1750,7 +1779,7 @@ function renderMarketsList() {
       const sp = a.spreadPct * 10000;
       const prev = lastMktChange[m.symbol];
       lastMktChange[m.symbol] = sp;
-      chEl.textContent = sp.toFixed(1) + ' bps';
+      chEl.textContent = (typeof sp === 'number' ? sp.toFixed(1) : '—') + ' bps';
       if (prev != null) flash(chEl, sp > prev ? 'up' : sp < prev ? 'down' : 'telemetry');
     }
   });
@@ -1889,7 +1918,7 @@ function renderCorrelation(c) {
       else if (absv >= 0.2) cls = 'style="color:var(--cyan)"';
       else cls = 'style="color:var(--text-dim)"';
       if (thresh && absv < thresh) { h += '<td ' + cls + '>—</td>'; }
-      else { h += '<td class="corr-cell" ' + cls + '>' + (v==null?'—':v.toFixed(2)) + '</td>'; }
+      else { h += '<td class="corr-cell" ' + cls + '>' + (v==null?'—':(typeof v==='number'?v.toFixed(2):'—')) + '</td>'; }
     });
     h += '</tr>';
   });
@@ -2071,21 +2100,25 @@ function drawTelemetryLoop() {
 }
 
 function drawSeries(ctx, arr, vMin, vMax, w, h, xStep, color, width) {
-  if (!arr.length) return;
+  let started = false;
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.beginPath();
   arr.forEach((v, i) => {
+    if (v == null || !Number.isFinite(v)) return;
     const x = i * xStep;
     const y = h - ((v - vMin) / (vMax - vMin)) * h;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    if (!started) { ctx.moveTo(x, y); started = true; }
+    else ctx.lineTo(x, y);
   });
   ctx.stroke();
 }
 
 function formatPrice(v) {
+  v = +v;
+  if (!Number.isFinite(v)) return '—';
   if (v >= 1000) return '$' + v.toLocaleString(undefined, {maximumFractionDigits:0});
   if (v >= 1) return '$' + v.toFixed(2);
   return '$' + v.toFixed(4);
@@ -2187,7 +2220,7 @@ async function refreshPerformance() {
     const bySym = d.bySymbol || {};
     const symEl = document.getElementById('jBySymbol');
     symEl.innerHTML = Object.entries(bySym).map(([sym, v]) => `<div class="sym-pl-row"><span>${esc(sym)}</span><span class="${(v.pl||0)>=0?'pos':'neg'}">${money(v.pl)} (${pct(v.plpc)})</span></div>`).join('') || '<div class="empty-hint" style="padding:8px;">No per-symbol data</div>';
-    document.getElementById('journalTrades').innerHTML = (d.trades||[]).slice(0,200).map(t => `<div class="row-list item" style="border:none;padding:8px;"><div class="left"><div class="sym">${esc(t.symbol)}</div><div class="sub">qty ${t.qty} · entry ${money(t.entryPrice)} · exit ${money(t.exitPrice)}</div></div><div class="right"><span class="${t.pl>=0?'pos-figure':'neg-figure'}">${money(t.pl)}</span><div class="small muted">${t.rMultiple!=null?t.rMultiple.toFixed(2)+'R':'—'} · ${t.holdingMinutes!=null?Math.round(t.holdingMinutes)+'m':'—'}</div></div></div>`).join('') || '<div class="empty-hint">No closed trades yet.</div>';
+    document.getElementById('journalTrades').innerHTML = (d.trades||[]).slice(0,200).map(t => `<div class="row-list item" style="border:none;padding:8px;"><div class="left"><div class="sym">${esc(t.symbol)}</div><div class="sub">qty ${t.qty} · entry ${money(t.entryPrice)} · exit ${money(t.exitPrice)}</div></div><div class="right"><span class="${t.pl>=0?'pos-figure':'neg-figure'}">${money(t.pl)}</span><div class="small muted">${t.rMultiple!=null&&typeof t.rMultiple==='number'?t.rMultiple.toFixed(2)+'R':'—'} · ${t.holdingMinutes!=null?Math.round(t.holdingMinutes)+'m':'—'}</div></div></div>`).join('') || '<div class="empty-hint">No closed trades yet.</div>';
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -2237,7 +2270,7 @@ function showWorkspace(ws) {
 function openSettings() {
   document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('active'));
   document.querySelectorAll('#view-account,#view-markets,#view-positions,#view-orders,#view-bot').forEach(v => v.style.display = 'none');
-  document.getElementById('view-orders').style.display = '';
+  document.getElementById('view-settings').style.display = '';
   showWorkspace('settings');
 }
 
@@ -2403,7 +2436,6 @@ document.getElementById('btnSaveCfg').onclick = async () => {
   }
 };
 
-});
 
 function init() {
   try {
@@ -2424,8 +2456,11 @@ function init() {
           refreshBot();
         } else if (tab === 'account') {
           document.getElementById('view-account').style.display = '';
+          refreshDashboard().catch(()=>{});
         } else if (tab === 'markets') {
           document.getElementById('view-markets').style.display = '';
+          refreshDashboard().catch(()=>{});
+          loadMarkets().catch(()=>{});
         } else if (tab === 'positions') {
           document.getElementById('view-positions').style.display = '';
         }
@@ -2443,6 +2478,7 @@ function init() {
     loadMarkets().then(() => {
       refreshDashboard();
       refreshStrategy();
+      updateTelemetryCanvas(state.markets[0]?.symbol || 'BTC/USD');
     }).catch(e => toast(e.message));
     refreshBot().catch(()=>{});
   } else {
@@ -2464,6 +2500,7 @@ setInterval(() => {
   else if (activePane === 'botLogSubview') refreshBot();
   const activeView = document.querySelector('.view.active')?.id;
   if (activeView === 'view-account') refreshDashboard();
+  if (activeView === 'view-markets') { refreshDashboard().catch(()=>{}); loadMarkets().catch(()=>{}); refreshStrategy().catch(()=>{}); }
 }, 30000);
 
 setInterval(() => {
