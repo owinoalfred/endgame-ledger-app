@@ -25,7 +25,7 @@ storage = "sqlite"
 
 # ── Observability ──
 [observability]
-enabled = false
+enabled = true
 
 [observability.logs]
 enabled = true
