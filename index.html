@@ -108,6 +108,7 @@
     flex-direction: column;
     background: var(--bg);
     overflow: hidden;
+    padding-bottom: 56px;
   }
 
   header.top {
@@ -1104,7 +1105,36 @@
   }
 
   nav.tabbar {
-    display: none;
+    display: flex;
+    justify-content: center;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    gap: 4px;
+    padding: 6px 8px;
+    z-index: 30;
+  }
+
+  nav.tabbar button {
+    background: var(--panel-alt);
+    border: 1px solid var(--line);
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 6px 10px;
+    cursor: pointer;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  nav.tabbar button.active {
+    background: var(--cyan-dim);
+    color: var(--cyan);
+    border-color: var(--cyan);
+  }
+
+  nav.tabbar button:hover {
+    background: var(--panel-hi);
+    color: var(--text);
   }
 
   ::-webkit-scrollbar {
@@ -1854,7 +1884,7 @@ function renderPositionsList(ps) {
     return `<div class="item" data-symbol="${esc(p.symbol)}">
       <div class="left">
         <div class="sym">${esc(p.symbol)} ${prot?'<span class="cluster-tag" style="background:var(--red-dim);color:var(--red);border-color:var(--red);">UNPROTECTED</span>':''} ${offUniverse?'<span class="cluster-tag" style="background:var(--amber-dim);color:var(--amber);border-color:var(--amber);">OFF-UNIVERSE</span>':''}</div>
-        <div class="sub">${(+p.qty).toFixed(6)} · avg ${money(p.avg_entry_price)} ${hasPendingOrder?`· avail ${qtyAvail}`:''}</div>
+        <div class="sub">${((+p.qty)||0).toFixed(6)} · avg ${money(p.avg_entry_price)} ${hasPendingOrder?`· avail ${qtyAvail}`:''}</div>
       </div>
       <div class="right">
         <div class="price">${money(p.market_value)}</div>
@@ -2348,10 +2378,11 @@ async function calcRiskSizing() {
     const equity = +(state.dashboard?.account?.equity || 0);
     if (!equity) throw Error('No equity data');
     const ru = Math.abs(entry - stop);
+    if (!Number.isFinite(ru) || ru <= 0) return;
     const riskAmt = equity * riskPct;
     let qty = riskAmt / ru;
     qty = m.assetClass === 'crypto' ? Math.floor(qty * 1e6) / 1e6 : Math.floor(qty);
-    const rr = Math.abs(target - entry) / ru;
+    const rr = ru > 0 ? Math.abs(target - entry) / ru : 0;
     const rrClass = rr >= 2 ? 'rr-good' : rr >= 1.5 ? 'rr-ok' : 'rr-poor';
     document.getElementById('riskCalcBox').innerHTML = `Entry ~${formatPrice(entry)} · Risk/unit ${formatPrice(ru)} · Suggested size <b>${qty}</b> · Max loss ${money(riskAmt)} · R:R <b class="${rrClass}">${rr.toFixed(2)}:1</b>`;
     document.getElementById('riskCalcBox').style.display = 'block';
